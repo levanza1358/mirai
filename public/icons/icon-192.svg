@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <rect width="192" height="192" fill="#0F1512"/>
+  <rect x="16" y="16" width="160" height="160" rx="36" fill="url(#mirai)"/>
+  <path d="M56 132V60l27 37a10 10 0 0 0 16 0l27-37v72" stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <defs>
+    <linearGradient id="mirai" x1="16" y1="16" x2="176" y2="176" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34D399"/>
+      <stop offset="0.55" stop-color="#10B981"/>
+      <stop offset="1" stop-color="#0D9488"/>
+    </linearGradient>
+  </defs>
+</svg>

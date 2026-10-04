@@ -1,0 +1,5 @@
+#!/bin/sh
+# Mirai launcher — run from the project root:  ./mirai restart   /   ./mirai start
+# Forwards all arguments to the bundled CLI.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "$SCRIPT_DIR/cli/cli.js" "$@"
