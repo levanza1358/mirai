@@ -56,7 +56,7 @@ flowchart LR
         API[V1 Compatibility API\n/v1/*]
         DASH[Dashboard + Management API\n/api/*]
         CORE[SSE + Translation Core\nopen-sse + src/sse]
-        DB[(db.json)]
+        DB[(SQLite data.sqlite)]
         UDB[(usage.json + log.txt)]
     end
 
@@ -87,6 +87,19 @@ flowchart LR
 
     DASH --> CLOUD
 ```
+
+## Dashboard information architecture
+
+The dashboard is served from `/dashboard` and uses the shared authenticated layout and sidebar. The home route is an operational overview; management screens remain available as separate routes:
+
+- **Dashboard home** (`/dashboard`): server health, active port and base URL, usage summary with **Today / 24h / 7D / 30D** ranges, provider status, top models, quick actions, and recent request activity. It refreshes automatically every 15 seconds and also provides a manual refresh action.
+- **Endpoint & Key** (`/dashboard/endpoint`): OpenAI-compatible base URL, API keys, endpoint options, and token-saving settings.
+- **Providers** (`/dashboard/providers`): provider connections, account status, authentication, and provider-level model configuration.
+- **Usage** (`/dashboard/usage`): detailed usage, cost, and request history.
+- **Settings** (`/dashboard/settings`): server and application settings, including the port test/apply-restart flow.
+- **Models and routing**: model management, aliases, combos, quota, and related tools are exposed through their existing sidebar routes.
+
+The home dashboard is intentionally read-oriented: destructive or credential-changing operations continue to live on their dedicated management pages.
 
 ## Core Runtime Components
 
@@ -145,7 +158,7 @@ Server port config:
 
 - `src/lib/portConfig.js` (single source of truth; mirrored by `cli/cli.js` and `custom-server.js`)
 - file: `${DATA_DIR}/config/port.json` (`{ "port": N }`)
-- resolution order: `PORT` env → `config/port.json` → default `1463`; `20129` reserved (updater status server)
+- resolution order: `PORT` env → `config/port.json` → default `1463`; `20129` reserved (internal)
 - exposed via `GET|POST /api/settings/port` and `GET /api/settings/port/check`; changing requires a free-port test, then restarts via `spawnDetachedRestart()` (`src/lib/appUpdater.js`)
 
 Usage DB:

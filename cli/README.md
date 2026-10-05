@@ -83,7 +83,6 @@ mirai                    # Start with default settings (port 1463)
 mirai start              # Explicit start
 mirai --port 8080        # Custom port
 mirai --no-browser       # Don't open browser
-mirai --skip-update      # Skip auto-update check
 mirai --help             # Show all options
 ```
 
@@ -104,7 +103,7 @@ Mirai runs on `localhost:1463` by default. Change it from the dashboard (**Setti
 1. The port is written to `~/.mirai/config/port.json` (`%APPDATA%/mirai/config/port.json` on Windows).
 2. Mirai restarts on the new port (or refuses the change if the port is in use).
 
-Resolution order: `PORT` env → `config/port.json` → default `1463`. Port `20129` is reserved for the updater.
+Resolution order: `PORT` env → `config/port.json` → default `1463`. Port `20129` is reserved for internal use.
 
 > **From a source checkout** you can use the bundled launchers `./mirai` (bash) or `.\mirai.cmd` (Windows) — e.g. `.\mirai restart` — no global install required.
 

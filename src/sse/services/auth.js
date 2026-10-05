@@ -4,6 +4,7 @@ import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLock
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache } from "./antigravityQuota.js";
+import { getCodeBuddyQuotaCache, isCodeBuddyQuotaProvider } from "./codebuddyQuota.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
@@ -82,7 +83,12 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const isAntigravity = providerId === "antigravity";
     const antigravityQuotaCache = isAntigravity && model ? getAntigravityQuotaCache() : null;
 
-    // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
+    // CodeBuddy (CN/Intl) request-meter cache: populated when the Quota tab is
+    // read or after a rate-limit error. Exhausted base packs are skipped.
+    const isCodeBuddyQuota = isCodeBuddyQuotaProvider(providerId);
+    const codeBuddyQuotaCache = isCodeBuddyQuota ? getCodeBuddyQuotaCache() : null;
+
+    // Filter out model-locked, excluded, and quota-exhausted connections.
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
@@ -94,6 +100,15 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         if (quota && quota.remainingPercentage <= 0 && quota.resetAt && new Date(quota.resetAt).getTime() > Date.now()) {
           const account = c.id?.slice(0, 8) || "unknown";
           log.info("AG_QUOTA", `${account} | CACHE_BLOCK ${model} — skip upstream until ${quota.resetAt}`);
+          return false;
+        }
+      }
+      // CodeBuddy: skip if the request (base pack) meter is exhausted
+      if (isCodeBuddyQuota && codeBuddyQuotaCache) {
+        const quota = codeBuddyQuotaCache.get(c.id);
+        if (quota?.exhausted && (!quota.resetAt || new Date(quota.resetAt).getTime() > Date.now())) {
+          const account = c.id?.slice(0, 8) || "unknown";
+          log.info("CBCN_QUOTA", `${account} | CACHE_BLOCK — request meter exhausted, skip until ${quota.resetAt || "cycle refresh"}`);
           return false;
         }
       }
@@ -117,6 +132,13 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       if (isAntigravity && model && antigravityQuotaCache) {
         connections.forEach((c) => {
           const resetAt = antigravityQuotaCache.get(c.id)?.[model]?.resetAt;
+          if (resetAt && new Date(resetAt).getTime() > Date.now()) expiries.push(resetAt);
+        });
+      }
+      // CodeBuddy: surface the base-pack cycle refresh as the retry time.
+      if (isCodeBuddyQuota && codeBuddyQuotaCache) {
+        connections.forEach((c) => {
+          const resetAt = codeBuddyQuotaCache.get(c.id)?.resetAt;
           if (resetAt && new Date(resetAt).getTime() > Date.now()) expiries.push(resetAt);
         });
       }

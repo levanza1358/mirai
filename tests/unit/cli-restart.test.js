@@ -15,7 +15,7 @@ describe("mirai CLI launcher", () => {
     expect(cliSrc).toMatch(/"config",\s*"port\.json"/);
   });
 
-  it("reserves the updater status port 20129", () => {
+  it("reserves the internal port 20129", () => {
     expect(cliSrc).toMatch(/n\s*!==\s*20129/);
   });
 
@@ -32,7 +32,7 @@ describe("mirai CLI launcher", () => {
   });
 
   it("relaunches detached in background/tray mode so no TTY is required", () => {
-    expect(cliSrc).toMatch(/const\s+relaunchArgs\s*=\s*\["--tray",\s*"--skip-update"\]/);
+    expect(cliSrc).toMatch(/const\s+relaunchArgs\s*=\s*\["--tray"\]/);
     expect(cliSrc).toMatch(/detached:\s*true/);
   });
 

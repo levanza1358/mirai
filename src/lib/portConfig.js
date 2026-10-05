@@ -15,7 +15,7 @@ export const DEFAULT_PORT = 1463;
 export const MIN_PORT = 1;
 export const MAX_PORT = 65535;
 
-// Reserved for the updater status server; never usable as the app port.
+// Reserved for internal use; never usable as the app port.
 export const RESERVED_PORTS = new Set([20129]);
 
 let cachedDataDir;

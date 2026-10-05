@@ -129,7 +129,7 @@ The port is persisted to `<dataDir>/config/port.json` and reused on the next sta
 2. `<dataDir>/config/port.json`
 3. Default `1463`
 
-> Port `20129` is reserved for Mirai's internal updater status server and cannot be used.
+> Port `20129` is reserved for Mirai's internal use and cannot be used.
 
 **Launcher shortcuts (source checkout):** the repo ships `mirai.cmd` (Windows) and `mirai` (bash):
 

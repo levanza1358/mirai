@@ -784,3 +784,72 @@ export function parseQuotaData(provider, data) {
 
   return normalizedQuotas;
 }
+
+// CodeBuddy (CN/Intl) reports one row per credit package — a recurring refill
+// (base) pack plus many one-shot bonus packs. On the provider detail tab we
+// collapse those into a short summary instead of a very tall list.
+const CODEBUDDY_AGGREGATED_PROVIDERS = new Set(["codebuddy-cn", "codebuddy-intl"]);
+
+/**
+ * Collapse CodeBuddy's per-package quota rows into a single summary row for the
+ * provider detail tab (the tab would otherwise be extremely tall with ~28 packs).
+ *
+ * The account is rate-limited only once its COMBINED usable quota (refill +
+ * all bonus packs) is empty — see isCodeBuddyQuotaExhausted in
+ * open-sse/services/usage/codebuddy-cn.js — so the headline bar is the sum of
+ * every pack, which matches exactly the number that gates routing. The subtitle
+ * still summarises how many refill / bonus packs were combined.
+ *
+ * @param {string} providerId
+ * @param {Array} quotas - normalized quota rows ({name,used,total,recurring,resetAt})
+ * @returns {{quotas: Array, label: string|null}}
+ */
+export function aggregateCodeBuddyQuotas(providerId, quotas = []) {
+  if (!CODEBUDDY_AGGREGATED_PROVIDERS.has(providerId) || quotas.length <= 1) {
+    return { quotas, label: null };
+  }
+
+  let used = 0;
+  let total = 0;
+  let unlimited = false;
+  let soonestReset = null;
+  let refillCount = 0;
+  let bonusCount = 0;
+
+  for (const quota of quotas) {
+    used += Number(quota.used) || 0;
+    total += Number(quota.total) || 0;
+    if (quota.total === 0 || quota.total === null) unlimited = true;
+    if (quota.recurring !== false) refillCount += 1;
+    else bonusCount += 1;
+    if (quota.resetAt) {
+      const ts = new Date(quota.resetAt).getTime();
+      if (Number.isFinite(ts) && (!soonestReset || ts < soonestReset)) {
+        soonestReset = ts;
+      }
+    }
+  }
+
+  const parts = [];
+  if (refillCount > 0) parts.push(`${refillCount} refill`);
+  if (bonusCount > 0) parts.push(`${bonusCount} bonus pack${bonusCount === 1 ? "" : "s"}`);
+  const label = parts.length > 0 ? `Total · ${parts.join(" + ")}` : "Total";
+
+  return {
+    quotas: [
+      {
+        name: label,
+        used: Math.round(used * 100) / 100,
+        total: Math.round(total * 100) / 100,
+        unlimited,
+        recurring: false,
+        resetAt: soonestReset ? new Date(soonestReset).toISOString() : null,
+      },
+    ],
+    label,
+  };
+}
+
+// CodeBuddy (CN/Intl) reports one row per credit package � a recurring refill
+// (base) pack plus many one-shot bonus packs. On the provider detail tab we
+// collapse those into a short, meaningful summary instead of a very tall list.

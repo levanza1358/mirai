@@ -15,6 +15,7 @@ import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import ModelsTable from "./ModelsTable";
+import ProviderQuotaTab from "./ProviderQuotaTab";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
@@ -27,6 +28,7 @@ import { DEFAULT_MODEL_TEST_PROMPT, summarizeModelTests } from "@/shared/utils/m
 import MarkdownMini from "@/shared/components/MarkdownMini";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
+import BulkImportCodeBuddyModal from "./BulkImportCodeBuddyModal";
 import CustomConfigCard from "./CustomConfigCard";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
@@ -56,6 +58,7 @@ export default function ProviderDetailPage() {
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
+  const [showBulkImportCodeBuddy, setShowBulkImportCodeBuddy] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showEditNodeModal, setShowEditNodeModal] = useState(false);
   const [showBulkProxyModal, setShowBulkProxyModal] = useState(false);
@@ -1464,6 +1467,7 @@ export default function ProviderDetailPage() {
   const mainTabDefs = [
     { key: "accounts", label: translate("Accounts"), icon: "group", count: connections.length },
     { key: "models", label: translate("Models"), icon: "deployed_code", count: null },
+    { key: "quota", label: translate("Quota"), icon: "data_usage", count: null },
   ];
 
   const renderTabs = (defs, active, onSelect, opts = {}) => (
@@ -1734,6 +1738,11 @@ export default function ProviderDetailPage() {
                 </div>
               </div>
               <div className="flex gap-2">
+                {(providerId === "codebuddy-cn" || providerId === "codebuddy-intl") && (
+                  <Button size="sm" icon="playlist_add" variant="secondary" onClick={() => setShowBulkImportCodeBuddy(true)}>
+                    {translate("Bulk Add")}
+                  </Button>
+                )}
                 {hasDualAuthModes ? (
                   <>
                     <Button size="sm" icon="lock" variant="secondary" onClick={triggerOAuthConnection}>
@@ -1853,6 +1862,18 @@ export default function ProviderDetailPage() {
                       variant="secondary"
                       onClick={() => setShowBulkImportGrokCli(true)}
                       title={translate("Bulk import Grok CLI accounts from JSON")}
+                      className="w-full sm:w-auto"
+                    >
+                      {translate("Bulk Add")}
+                    </Button>
+                  )}
+                  {(providerId === "codebuddy-cn" || providerId === "codebuddy-intl") && (
+                    <Button
+                      size="sm"
+                      icon="playlist_add"
+                      variant="secondary"
+                      onClick={() => setShowBulkImportCodeBuddy(true)}
+                      title={translate("Bulk import CodeBuddy accounts from JSON")}
                       className="w-full sm:w-auto"
                     >
                       {translate("Bulk Add")}
@@ -2028,6 +2049,11 @@ export default function ProviderDetailPage() {
       </Card>
       )}
 
+      {/* Quota tab */}
+      {mainTab === "quota" && (
+        <ProviderQuotaTab providerId={providerId} connections={connections} />
+      )}
+
       {bulkActionModal}
 
       {/* Modals */}
@@ -2153,6 +2179,15 @@ export default function ProviderDetailPage() {
           isOpen={showBulkImportGrokCli}
           onClose={() => setShowBulkImportGrokCli(false)}
           onSuccess={fetchConnections}
+        />
+      )}
+
+      {!isCompatible && (providerId === "codebuddy-cn" || providerId === "codebuddy-intl") && (
+        <BulkImportCodeBuddyModal
+          isOpen={showBulkImportCodeBuddy}
+          onClose={() => setShowBulkImportCodeBuddy(false)}
+          onSuccess={fetchConnections}
+          provider={providerId}
         />
       )}
 

@@ -17,6 +17,9 @@
  *
  * We surface one quota row per package — a cadence label (Monthly/Weekly/Daily)
  * for refill packs, "Bonus Pack N" for bonus packs (soonest-expiring first).
+ *
+ * The account is considered rate-limited only once its COMBINED usable quota
+ * (refill remaining + all bonus remaining) is empty — see isCodeBuddyQuotaExhausted.
  */
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
@@ -30,6 +33,71 @@ function num(precise, plain) {
   const n = Number(precise ?? plain);
   return Number.isFinite(n) ? n : 0;
 }
+
+/**
+ * Is a CodeBuddy account's *usable* request quota exhausted?
+ *
+ * CodeBuddy reports usable credit across two kinds of packs:
+ *  - Refill/base ("体验版"): recurring allowance, live numbers in the
+ *    CycleCapacity* fields.
+ *  - Bonus ("运营裂变包" etc.): one-shot gift credits, numbers in the plain
+ *    Capacity* fields.
+ *
+ * Upstream only starts answering rate-limited once the account has NOTHING
+ * left to spend across *all* its packs — so exhaustion means the combined
+ * remaining (refill remain + sum of bonus remaining) is <= 0, NOT that any one
+ * pack hit zero. A fresh refill pack keeps the account alive even with an empty
+ * bonus balance, and leftover bonus credits keep it alive even after the refill
+ * pack drains (which is the common case: the 500-request refill runs out long
+ * before the ~4,500 gifted requests do).
+ *
+ * Unknown/missing sizes contribute nothing and must NOT force exhaustion (an
+ * empty/unknown payload would otherwise poison the router cache).
+ *
+ * @param {Array<Object>} accounts - data.Response.Data.Accounts[]
+ * @returns {boolean}
+ */
+export function isCodeBuddyQuotaExhausted(accounts) {
+  if (!Array.isArray(accounts) || accounts.length === 0) return false;
+
+  const cycleEndMs = (acc) => {
+    const r = parseResetTime(acc.CycleEndTime);
+    return r ? new Date(r).getTime() : Number.POSITIVE_INFINITY;
+  };
+  // Refill packs roll into a new cycle well before the resource expires; bonus
+  // packs end exactly at expiry. >2d gap between cycle end and validity end = refill.
+  const REFILL_GAP_MS = 2 * 24 * 60 * 60 * 1000;
+  const isRefill = (acc) => {
+    const ce = cycleEndMs(acc);
+    const de = Number(acc.DeductionEndTime);
+    return Number.isFinite(ce) && Number.isFinite(de) && de - ce > REFILL_GAP_MS;
+  };
+
+  let totalRemain = 0;
+  let sawSizedPack = false;
+  for (const acc of accounts) {
+    if (!acc || typeof acc !== "object") continue;
+    if (isRefill(acc)) {
+      const size = num(acc.CycleCapacitySizePrecise, acc.CycleCapacitySize);
+      const remain = num(acc.CycleCapacityRemainPrecise, acc.CycleCapacityRemain);
+      if (size > 0) {
+        sawSizedPack = true;
+        totalRemain += remain;
+      }
+    } else {
+      const size = num(acc.CapacitySizePrecise, acc.CapacitySize);
+      const used = num(acc.CapacityUsedPrecise, acc.CapacityUsed);
+      if (size > 0) {
+        sawSizedPack = true;
+        totalRemain += size - used;
+      }
+    }
+  }
+
+  if (!sawSizedPack) return false; // nothing measurable → don't poison the cache
+  return totalRemain <= 0;
+}
+
 
 // Label a refill pack by its cycle length (Monthly is the common CodeBuddy case).
 function refillCadence(acc) {
@@ -131,7 +199,17 @@ async function getCodeBuddyUsage(providerId, accessToken, apiKey, providerSpecif
     const basePkg = refills[0] || accounts[0] || {};
     const plan = basePkg.PackageName || basePkg.SubProductName || "CodeBuddy";
 
-    return { plan, quotas };
+    // Request-meter signal for the router: the account is rate limited only
+    // once its COMBINED usable quota (refill + all bonus packs) is empty. The
+    // reset time is the soonest refresh among the packs that will refill first
+    // (refill packs reset monthly; bonus packs never do), matching the order
+    // used above so the retry time is the earliest recovery.
+    const requestExhausted = isCodeBuddyQuotaExhausted(accounts);
+    const requestExhaustedAt = requestExhausted
+      ? parseResetTime((refills[0] || accounts[0] || {}).CycleEndTime)
+      : null;
+
+    return { plan, quotas, requestExhausted, resetAt: requestExhaustedAt };
   } catch (error) {
     return { message: `CodeBuddy (${providerId}) error: ${error.message}` };
   }

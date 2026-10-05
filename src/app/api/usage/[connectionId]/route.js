@@ -6,6 +6,7 @@ import { getUsageForProvider } from "open-sse/services/usage.js";
 import { isUnrecoverableRefreshError } from "open-sse/services/tokenRefresh.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
+import { recordCodeBuddyUsage, isCodeBuddyQuotaProvider } from "@/sse/services/codebuddyQuota";
 import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
 
 // Detect auth-expired messages returned by usage providers instead of throwing
@@ -192,6 +193,12 @@ export async function GET(request, { params }) {
       } catch (retryError) {
         console.warn(`[Usage] ${connection.provider}: force refresh failed: ${retryError.message}`);
       }
+    }
+
+    // Feed the CodeBuddy request-meter cache so the router can skip accounts
+    // whose base pack is exhausted (learned as soon as the Quota tab is read).
+    if (isCodeBuddyQuotaProvider(connection.provider)) {
+      recordCodeBuddyUsage(connection.id, usage);
     }
 
     return Response.json(usage);

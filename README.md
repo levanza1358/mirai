@@ -153,7 +153,7 @@ The chosen port is persisted to `<dataDir>/config/port.json` (see [Configuration
 2. `<dataDir>/config/port.json`
 3. Default `1463`
 
-> Port `20129` is reserved for Mirai's internal updater status server and cannot be used.
+> Port `20129` is reserved for Mirai's internal use and cannot be used.
 
 **Launcher shortcuts (from a source checkout):** the repo ships `mirai.cmd` (Windows) and `mirai` (bash) so you can start/restart without a global install:
 
@@ -1483,7 +1483,7 @@ Notes:
 **"Port is already in use" when changing the port**
 
 - Mirai refuses to apply a port that is occupied. Test with another port (or free the one in use) and try again.
-- Port `20129` is reserved by Mirai's updater and cannot be selected.
+- Port `20129` is reserved for internal use and cannot be selected.
 
 **After changing the port the app did not come back**
 

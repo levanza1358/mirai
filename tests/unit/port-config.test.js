@@ -44,7 +44,7 @@ describe("portConfig", () => {
     expect(isValidPort(0)).toBe(false);
     expect(isValidPort(65536)).toBe(false);
     expect(isValidPort("abc")).toBe(false);
-    expect(isValidPort(20129)).toBe(false); // reserved updater status port
+    expect(isValidPort(20129)).toBe(false); // reserved internal port
   });
 
   it("persists and reads a port", async () => {

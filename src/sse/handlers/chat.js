@@ -8,6 +8,7 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
+import { handleCodeBuddyQuotaError, isCodeBuddyQuotaProvider } from "../services/codebuddyQuota.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
@@ -324,9 +325,23 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       if (quotaResetMs) resetsAtMs = quotaResetMs;
     }
 
+    // CodeBuddy 429/402/403: refresh the request-meter cache and lock with the
+    // base pack's cycle refresh when it reads as exhausted.
+    if (isCodeBuddyQuotaProvider(provider) && (result.status === 429 || result.status === 402 || result.status === 403)) {
+      const cbResetMs = await handleCodeBuddyQuotaError(
+        credentials.connectionId,
+        { ...credentials, provider, accessToken: refreshedCredentials.accessToken },
+        result.status
+      );
+      if (cbResetMs) {
+        quotaResetMs = cbResetMs;
+        resetsAtMs = cbResetMs;
+      }
+    }
+
     // Exhausted Antigravity model is blocked only in RAM cache until upstream resetAt.
     // Do not persist a modelLock_* for this path.
-    const shouldFallback = provider === "antigravity" && quotaResetMs
+    const shouldFallback = (provider === "antigravity" && quotaResetMs)
       ? true
       : (await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, resetsAtMs)).shouldFallback;
 

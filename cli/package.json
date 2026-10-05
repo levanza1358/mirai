@@ -1,6 +1,6 @@
 {
   "name": "mirai",
-  "version": "0.5.95",
+  "version": "1.0.0",
   "description": "Mirai CLI - Start and manage Mirai server",
   "bin": {
     "mirai": "./cli.js"
