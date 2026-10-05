@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDistinctProviders } from "@/lib/requestDetailsDb";
+import { getDistinctProvidersFromHistory } from "@/lib/usageDb";
 import { getProviderNodes } from "@/lib/localDb";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
 
@@ -11,7 +12,10 @@ export async function GET() {
   try {
     // Query DISTINCT provider column directly — avoids parsing every row's
     // full JSON blob (can be hundreds of MB), which previously caused OOM.
-    const providerIds = await getDistinctProviders();
+    let providerIds = await getDistinctProviders();
+    // Observability is optional; fall back to usageHistory so the filter is
+    // never empty when only usageHistory data exists.
+    if (!providerIds.length) providerIds = await getDistinctProvidersFromHistory();
 
     const providerNodes = await getProviderNodes();
     const nodeMap = {};

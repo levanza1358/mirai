@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
+import { getConnectionPlan, getPlanBadge } from "@/shared/utils/planBadge";
 import PropTypes from "prop-types";
 import { Card, Badge, Button, Modal, Select, Toggle, EditConnectionModal, ConfirmModal } from "@/shared/components";
 
@@ -93,6 +94,8 @@ function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMov
     ? connection.name || connection.email || connection.displayName || "OAuth Account"
     : connection.name;
 
+  const planBadge = getPlanBadge(getConnectionPlan(connection));
+
   const handleSelectProxy = async (poolId) => {
     setUpdatingProxy(true);
     try { await onUpdateProxy(poolId === "__none__" ? null : poolId); }
@@ -123,6 +126,11 @@ function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMov
               <span className="text-xs text-red-500 truncate max-w-[300px]" title={connection.lastError}>{connection.lastError}</span>
             )}
             <span className="text-xs text-text-muted">#{connection.priority}</span>
+            {planBadge && (
+              <Badge variant="default" size="sm" className={planBadge.className}>
+                {planBadge.label}
+              </Badge>
+            )}
           </div>
           {hasAnyProxy && (
             <div className="mt-1 flex flex-wrap items-center gap-2">

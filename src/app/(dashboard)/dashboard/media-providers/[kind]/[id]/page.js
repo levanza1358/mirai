@@ -3,7 +3,7 @@
 import { useParams, notFound, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { Card, Badge, Button, AddCustomEmbeddingModal, NoAuthProxyCard, ProviderInfoCard } from "@/shared/components";
+import { Badge, Button, AddCustomEmbeddingModal, NoAuthProxyCard, ProviderInfoCard } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider } from "@/shared/constants/providers";
 import ConnectionsCard from "@/app/(dashboard)/dashboard/providers/components/ConnectionsCard";
@@ -13,6 +13,35 @@ import { EmbeddingExampleCard } from "./components/EmbeddingExampleCard";
 import { TtsExampleCard } from "./components/TtsExampleCard";
 import { GenericExampleCard } from "./components/GenericExampleCard";
 import { SttExampleCard } from "./components/SttExampleCard";
+import MediaPlayground from "./components/MediaPlayground";
+import HistoryPanel from "./components/HistoryPanel";
+
+// Per-kind playground metadata (title + accent + icon) for the Chat tab header.
+const KIND_STUDIO = {
+  image: { title: "Image Studio", icon: "brush", accent: "#8B5CF6" },
+  video: { title: "Video Studio", icon: "movie", accent: "#0EA5E9" },
+  tts: { title: "Voice Studio", icon: "record_voice_over", accent: "#F59E0B" },
+  music: { title: "Music Studio", icon: "music_note", accent: "#EC4899" },
+  stt: { title: "Transcript Studio", icon: "mic", accent: "#10B981" },
+  imageToText: { title: "Vision Studio", icon: "image_search", accent: "#6366F1" },
+  embedding: { title: "Embedding Studio", icon: "data_array", accent: "#14B8A6" },
+  webSearch: { title: "Search Studio", icon: "travel_explore", accent: "#3B82F6" },
+  webFetch: { title: "Fetch Studio", icon: "language", accent: "#06B6D4" },
+  systemone: { title: "System One Studio", icon: "psychology", accent: "#A855F7" },
+};
+
+const HISTORY_LIMIT = 50;
+
+/** Safely read a saved generation-history array from localStorage. */
+function readHistory(key) {
+  try {
+    const saved = window.localStorage.getItem(key);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 // MediaProviderDetailPage
 export default function MediaProviderDetailPage() {
@@ -34,6 +63,53 @@ export default function MediaProviderDetailPage() {
   const [customNode, setCustomNode] = useState(null);
   const [customLoading, setCustomLoading] = useState(isCustom);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [activeTab, setActiveTab] = useState("chat");
+
+  // ---- persisted generation history (localStorage, per provider + kind) ----
+  // localStorage is unavailable during SSR/hydration, so load it after mount
+  // and whenever the provider/kind key changes. Writes are explicit (inside the
+  // mutating handlers) so a stale initial `[]` render can never clobber storage.
+  const historyKey = `mirai:mediaHistory:${id}:${kind}`;
+  const [history, setHistory] = useState([]);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- syncing from localStorage (external store) */
+  useEffect(() => {
+    setHistory(readHistory(historyKey));
+  }, [historyKey]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Persist a concrete list for the current key.
+  const persistHistory = (list) => {
+    try {
+      if (list.length === 0) window.localStorage.removeItem(historyKey);
+      else window.localStorage.setItem(historyKey, JSON.stringify(list.slice(0, HISTORY_LIMIT)));
+    } catch {
+      /* storage full / unavailable — history simply won't persist */
+    }
+  };
+
+  const handleResult = (entry) => {
+    const record = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      createdAt: new Date().toISOString(),
+      ...entry,
+    };
+    const next = [record, ...history].slice(0, HISTORY_LIMIT);
+    persistHistory(next);
+    setHistory(next);
+  };
+
+  const clearHistory = () => {
+    if (history.length && !confirm("Clear generation history for this provider?")) return;
+    persistHistory([]);
+    setHistory([]);
+  };
+
+  const removeHistory = (recordId) => {
+    const next = history.filter((r) => r.id !== recordId);
+    persistHistory(next);
+    setHistory(next);
+  };
 
   // Fetch custom node info from API for custom embedding nodes
   useEffect(() => {
@@ -47,6 +123,23 @@ export default function MediaProviderDetailPage() {
         setCustomLoading(false);
       })
       .catch(() => { if (!cancelled) setCustomLoading(false); });
+    return () => { cancelled = true; };
+  }, [id, isCustom]);
+
+  // ---- account status (accounts are managed on the Providers page) ----
+  const [accountCount, setAccountCount] = useState(null);
+
+  useEffect(() => {
+    if (isCustom) return;
+    let cancelled = false;
+    fetch("/api/providers", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const all = d.connections || [];
+        setAccountCount(all.filter((c) => c.provider === id).length);
+      })
+      .catch(() => { if (!cancelled) setAccountCount(null); });
     return () => { cancelled = true; };
   }, [id, isCustom]);
 
@@ -68,8 +161,22 @@ export default function MediaProviderDetailPage() {
   const kinds = isCustom ? ["embedding"] : (provider.serviceKinds ?? ["llm"]);
   if (!isCustom && !kinds.includes(kind)) return notFound();
 
+  const hasConfig = !isCustom && (provider.searchConfig || provider.fetchConfig || provider.ttsConfig || provider.sttConfig || provider.embeddingConfig || provider.systemoneConfig || provider.searchViaChat);
+  const showModelsTab = kind !== "tts" && kind !== "webSearch" && kind !== "webFetch";
+  const studio = KIND_STUDIO[kind] || { title: "Playground", icon: "bolt", accent: "#8B5CF6" };
+
+  const tabs = [
+    { key: "chat", label: "Chat", icon: "chat" },
+    hasConfig && { key: "config", label: "Config", icon: "settings" },
+    showModelsTab && { key: "models", label: "Models", icon: "deployed_code" },
+    { key: "history", label: "History", icon: "history", count: history.length },
+  ].filter(Boolean);
+
+  // Fall back to the first tab if the active one is unavailable (e.g. no config).
+  const active = tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0].key;
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {/* Back */}
       <div>
         <Link
@@ -114,6 +221,17 @@ export default function MediaProviderDetailPage() {
                   {k.toUpperCase()}
                 </Badge>
               ))}
+              {!isCustom && (
+                <Link
+                  href={`/dashboard/providers/${id}`}
+                  title="Manage accounts on the Providers page"
+                  className="text-xs text-text-muted hover:text-primary transition-colors inline-flex items-center gap-1 ml-1"
+                >
+                  <span className="material-symbols-outlined text-[14px]">group</span>
+                  {accountCount == null ? "Accounts" : `${accountCount} account${accountCount === 1 ? "" : "s"}`}
+                  <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                </Link>
+              )}
             </div>
           </div>
           {isCustom && (
@@ -155,15 +273,82 @@ export default function MediaProviderDetailPage() {
         </div>
       )}
 
-      {/* Connections */}
-      {!isCustom && provider.noAuth ? (
-        <NoAuthProxyCard providerId={id} />
-      ) : (
-        <ConnectionsCard providerId={id} isOAuth={false} />
+      {/* Tabs: Chat · Config · Models · History */}
+      <div className="flex flex-wrap items-center gap-1 border-b border-black/[0.06] dark:border-white/[0.06]">
+        {tabs.map((tab) => {
+          const isActive = tab.key === active;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${isActive
+                ? "border-primary text-primary"
+                : "border-transparent text-text-muted hover:border-black/10 hover:text-text-main dark:hover:border-white/10"}`}
+            >
+              <span className="material-symbols-outlined text-[16px]">{tab.icon}</span>
+              {tab.label}
+              {tab.count != null && tab.count > 0 && (
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${isActive ? "bg-primary/15 text-primary" : "bg-black/[0.06] text-text-muted dark:bg-white/[0.08]"}`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Chat tab */}
+      {active === "chat" && (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <div
+              className="size-9 rounded-[10px] flex items-center justify-center shrink-0"
+              style={{ backgroundColor: `${studio.accent}1F`, color: studio.accent }}
+            >
+              <span className="material-symbols-outlined text-[20px]">{studio.icon}</span>
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-text-main">{studio.title}</h3>
+              <p className="text-xs text-text-muted truncate">
+                {provider.name} · {kindConfig.label}
+              </p>
+            </div>
+          </div>
+
+          <MediaPlayground providerId={id} kind={kind} onResult={handleResult} />
+
+          {/* Example — per kind (reference snippets below the composer) */}
+          {kind === "embedding" && (
+            <EmbeddingExampleCard providerId={id} customAlias={customNode?.prefix} />
+          )}
+          {kind === "tts" && <TtsExampleCard providerId={id} />}
+          {kind === "stt" && !isCustom && <SttExampleCard providerId={id} />}
+          {!isCustom && KIND_EXAMPLE_CONFIG[kind] && <GenericExampleCard providerId={id} kind={kind} />}
+        </div>
       )}
 
-      {/* Models - hidden for tts/webSearch/webFetch (provider IS the model); custom uses prefix as alias */}
-      {kind !== "tts" && kind !== "webSearch" && kind !== "webFetch" && (
+      {/* Config tab — provider info card is here. */}
+      {active === "config" && (
+        <div className="flex flex-col gap-6">
+          {hasConfig && (
+            <ProviderInfoCard
+              config={
+                kind === "webFetch" ? provider.fetchConfig
+                  : kind === "tts" ? provider.ttsConfig
+                  : kind === "stt" ? provider.sttConfig
+                  : kind === "embedding" ? provider.embeddingConfig
+                  : kind === "systemone" ? provider.systemoneConfig
+                  : provider.searchConfig || { mode: "chat-completions", defaultModel: provider.searchViaChat?.defaultModel, pricingUrl: provider.searchViaChat?.pricingUrl, freeTier: provider.searchViaChat?.freeTier }
+              }
+              provider={provider}
+              title={`${kindConfig.label} Config`}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Models tab */}
+      {active === "models" && (
         <ModelsCard
           providerId={id}
           kindFilter={kind}
@@ -171,29 +356,10 @@ export default function MediaProviderDetailPage() {
         />
       )}
 
-      {/* Provider Info — config-driven, supports searchConfig, fetchConfig, ttsConfig, embeddingConfig, systemoneConfig, searchViaChat */}
-      {!isCustom && (provider.searchConfig || provider.fetchConfig || provider.ttsConfig || provider.sttConfig || provider.embeddingConfig || provider.systemoneConfig || provider.searchViaChat) && (
-        <ProviderInfoCard
-          config={
-            kind === "webFetch" ? provider.fetchConfig
-              : kind === "tts" ? provider.ttsConfig
-              : kind === "stt" ? provider.sttConfig
-              : kind === "embedding" ? provider.embeddingConfig
-              : kind === "systemone" ? provider.systemoneConfig
-              : provider.searchConfig || { mode: "chat-completions", defaultModel: provider.searchViaChat?.defaultModel, pricingUrl: provider.searchViaChat?.pricingUrl, freeTier: provider.searchViaChat?.freeTier }
-          }
-          provider={provider}
-          title={`${kindConfig.label} Config`}
-        />
+      {/* History tab */}
+      {active === "history" && (
+        <HistoryPanel records={history} onClear={clearHistory} onRemove={removeHistory} />
       )}
-
-      {/* Example — per kind */}
-      {kind === "embedding" && (
-        <EmbeddingExampleCard providerId={id} customAlias={customNode?.prefix} />
-      )}
-      {kind === "tts" && <TtsExampleCard providerId={id} />}
-      {kind === "stt" && !isCustom && <SttExampleCard providerId={id} />}
-      {!isCustom && KIND_EXAMPLE_CONFIG[kind] && <GenericExampleCard providerId={id} kind={kind} />}
 
       {isCustom && (
         <AddCustomEmbeddingModal

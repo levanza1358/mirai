@@ -10,10 +10,20 @@ describe("classifyConnection", () => {
     expect(classifyConnection({ testStatus: "active", isActive: true }, NOW)).toBe("active");
   });
 
-  it("classifies error/expired/unavailable test statuses as error", () => {
+  it("classifies error/expired test statuses as error", () => {
     expect(classifyConnection({ testStatus: "error" }, NOW)).toBe("error");
     expect(classifyConnection({ testStatus: "expired" }, NOW)).toBe("error");
-    expect(classifyConnection({ testStatus: "unavailable" }, NOW)).toBe("error");
+  });
+
+  it("treats 'unavailable' with no active cooldown as active (auto-recover after cooldown)", () => {
+    expect(classifyConnection({ testStatus: "unavailable" }, NOW)).toBe("active");
+    expect(classifyConnection({ testStatus: "unavailable", isActive: true }, NOW)).toBe("active");
+  });
+
+  it("treats 'unavailable' with an active cooldown as rate limited", () => {
+    expect(
+      classifyConnection({ testStatus: "unavailable", isActive: true, modelLock_gpt: FUTURE }, NOW),
+    ).toBe("rateLimited");
   });
 
   it("treats a future rateLimitedUntil as rate limited", () => {

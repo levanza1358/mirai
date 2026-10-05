@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRequestDetails } from "@/lib/usageDb";
+import { getRequestDetails, getRequestDetailsFromHistory } from "@/lib/usageDb";
 
 /**
  * GET /api/usage/request-details
@@ -46,7 +46,18 @@ export async function GET(request) {
     if (startDate) filter.startDate = startDate;
     if (endDate) filter.endDate = endDate;
     
-    const result = await getRequestDetails(filter);
+    let result = await getRequestDetails(filter);
+
+    // Fallback: the observability store is optional (off by default), so when it
+    // has no matching rows serve the same page from usageHistory, which is always
+    // written. This keeps the Details tab usable without enabling observability.
+    if (!result.details || result.details.length === 0) {
+      const fallback = await getRequestDetailsFromHistory(filter);
+      if (fallback.pagination.totalItems > 0) {
+        return NextResponse.json(fallback);
+      }
+      result = fallback;
+    }
 
     // Redact conversation payloads: the stored details include full request
     // bodies (user prompts, tool calls) and provider responses. Returning them

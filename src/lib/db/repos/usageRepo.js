@@ -819,3 +819,75 @@ export async function getRecentLogs(limit = 200) {
     return [];
   }
 }
+
+// --- Request details fallback (usageHistory) ---------------------------------
+// The observability store (requestDetails) is optional and off by default. To
+// keep the Usage → Details tab working without it, the same filter/pagination
+// contract is served from usageHistory, which is always written.
+
+function mapHistoryRowToDetail(row, index) {
+  const tk = row.tokens ? parseJson(row.tokens, {}) : {};
+  const prompt = row.promptTokens ?? tk.prompt_tokens ?? 0;
+  const completion = row.completionTokens ?? tk.completion_tokens ?? 0;
+  const meta = row.meta ? parseJson(row.meta, {}) : {};
+  const cache = tk.cached_tokens ?? tk.cache_read_input_tokens ?? 0;
+  return {
+    id: meta.id || `uh-${row.id ?? index}`,
+    timestamp: row.timestamp,
+    provider: row.provider || null,
+    model: row.model || null,
+    connectionId: row.connectionId || null,
+    status: row.status || null,
+    latency: {
+      ttft: Number(meta.ttft ?? tk.ttft ?? 0) || 0,
+      total: Number(meta.latency ?? tk.latency ?? 0) || 0,
+    },
+    tokens: {
+      prompt_tokens: prompt < cache ? cache : prompt,
+      completion_tokens: completion,
+      total_tokens: tk.total_tokens ?? (Number(prompt) + Number(completion)),
+      cached_tokens: cache,
+      cache_creation_input_tokens: tk.cache_creation_input_tokens ?? 0,
+    },
+    cost: row.cost ?? 0,
+    source: "usageHistory",
+  };
+}
+
+export async function getRequestDetailsFromHistory(filter = {}) {
+  const db = await getAdapter();
+  const conds = [];
+  const params = [];
+
+  if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
+  if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
+  if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
+  if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
+  if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
+  if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
+
+  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+  const cntRow = db.get(`SELECT COUNT(*) as c FROM usageHistory ${where}`, params);
+  const totalItems = cntRow ? cntRow.c : 0;
+
+  const page = filter.page || 1;
+  const pageSize = filter.pageSize || 20;
+  const totalPages = Math.ceil(totalItems / pageSize);
+  const offset = (page - 1) * pageSize;
+
+  const rows = db.all(
+    `SELECT id, timestamp, provider, model, connectionId, cost, status, tokens, meta FROM usageHistory ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset],
+  );
+
+  return {
+    details: rows.map(mapHistoryRowToDetail),
+    pagination: { page, pageSize, totalItems, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
+  };
+}
+
+export async function getDistinctProvidersFromHistory() {
+  const db = await getAdapter();
+  const rows = db.all(`SELECT DISTINCT provider FROM usageHistory WHERE provider IS NOT NULL AND provider <> '' ORDER BY provider ASC`);
+  return rows.map((r) => r.provider);
+}

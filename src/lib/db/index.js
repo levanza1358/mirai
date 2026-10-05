@@ -60,6 +60,7 @@ export {
   statsEmitter, trackPendingRequest, getActiveRequests,
   saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
   appendRequestLog, getRecentLogs,
+  getRequestDetailsFromHistory, getDistinctProvidersFromHistory,
 } from "./repos/usageRepo.js";
 
 // Request details

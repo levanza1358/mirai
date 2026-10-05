@@ -24,8 +24,8 @@ function earliestActiveModelLock(conn, now) {
  *
  * Rate limited = the connection is enabled (isActive !== false) and either an
  * active model lock (modelLock_*) or a future rateLimitedUntil timestamp is set.
- * Error = testStatus reports error / expired / unavailable (and it is not
- * currently rate limited).
+ * Error = testStatus reports error / expired (and it is not currently rate
+ * limited). testStatus "unavailable" with no active cooldown counts as active.
  * Everything else is active.
  */
 export function classifyConnection(conn, now = Date.now()) {
@@ -37,7 +37,13 @@ export function classifyConnection(conn, now = Date.now()) {
   if (inCooldown) return "rateLimited";
 
   const status = conn.testStatus;
-  if (status === "error" || status === "expired" || status === "unavailable") return "error";
+  // "unavailable" is the marker markAccountUnavailable() stamps alongside a
+  // temporary modelLock_* cooldown (429 / 5xx / transient). Once that cooldown
+  // has expired there is no active lock left, so the account is healthy again —
+  // otherwise a single transient rate limit would lock it until a manual Test.
+  // "error" / "expired" (e.g. 401 invalid key) stay in the error bucket until a
+  // successful request or a manual Test clears them.
+  if (status === "error" || status === "expired") return "error";
   return "active";
 }
 

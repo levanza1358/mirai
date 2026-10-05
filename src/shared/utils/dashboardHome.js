@@ -66,6 +66,7 @@ export function normalizeStats(raw) {
   const completion = s.totalCompletionTokens ?? s.completionTokens ?? s.total?.completionTokens ?? 0;
   const cost = s.totalCost ?? s.cost ?? s.total?.cost ?? 0;
   const byModel = s.byModel || s.models || s.total?.byModel || {};
+  const byProvider = s.byProvider || s.providers || s.total?.byProvider || {};
   return {
     totalRequests: Number(requests) || 0,
     totalPromptTokens: Number(prompt) || 0,
@@ -73,6 +74,7 @@ export function normalizeStats(raw) {
     totalCompletionTokens: Number(completion) || 0,
     totalCost: Number(cost) || 0,
     byModel,
+    byProvider,
   };
 }
 

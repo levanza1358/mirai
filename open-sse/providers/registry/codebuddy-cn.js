@@ -69,7 +69,19 @@ export default {
     { id: "kimi-k3-1", name: "Kimi-K3" },
     { id: "deepseek-v4-pro", name: "DeepSeek-V4-Pro" },
     { id: "deepseek-v4.1-flash", name: "DeepSeek-V4.1-Flash" },
+    // Media models — served by the same gateway but on undocumented /v2/* routes
+    // (the plugin talks to /v2/chat/completions; these live alongside it).
+    // Verified 2026-10: /v2/images/generations + /v2/embeddings answer 200 with an
+    // OAuth token, no extra auth headers. TTS (/v2/audio/speech) is NOT reachable
+    // this way — it demands its own X-Api-Key, so no ttsConfig here.
+    { id: "hunyuan-image-alpha", name: "Hunyuan Image Alpha", kind: "image" },
+    { id: "hunyuan-image-alpha-edit", name: "Hunyuan Image Alpha Edit", kind: "image" },
+    { id: "hunyuan-embedding", name: "Hunyuan Embedding", kind: "embedding" },
+    { id: "bge-m3", name: "BGE-M3", kind: "embedding" },
   ],
+  serviceKinds: ["llm", "image", "embedding"],
+  imageConfig: { baseUrl: "https://copilot.tencent.com/v2/images/generations" },
+  embeddingConfig: { baseUrl: "https://copilot.tencent.com/v2/embeddings" },
   oauth: {
     baseUrl: "https://copilot.tencent.com",
     stateUrl: "https://copilot.tencent.com/v2/plugin/auth/state",

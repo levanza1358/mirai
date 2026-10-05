@@ -2,11 +2,34 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Card from "@/shared/components/Card";
+import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
+
+function formatNumber(value) {
+  return new Intl.NumberFormat().format(Number(value) || 0);
+}
+
+function isOkStatus(status) {
+  const s = String(status || "").toLowerCase();
+  return s === "ok" || s === "success" || s === "completed";
+}
+
+function statusMeta(status) {
+  if (isOkStatus(status)) return { variant: "success", label: String(status || "ok").toUpperCase() };
+  if (String(status).toLowerCase() === "pending") return { variant: "warning", label: "PENDING" };
+  return { variant: "error", label: String(status || "error").toUpperCase() };
+}
+
+function cacheRatio(tokens) {
+  const input = getInputTokens(tokens);
+  const cached = getCachedTokens(tokens);
+  if (!input) return 0;
+  return Math.round((cached / input) * 100);
+}
 
 let providerNameCache = null;
 let providerNodesCache = null;
@@ -179,10 +202,33 @@ export default function RequestDetailsTab() {
     setFilters({ provider: "", startDate: "", endDate: "" });
   };
 
+  const hasFilters = Boolean(filters.provider || filters.startDate || filters.endDate);
+  const totalItems = pagination.totalItems || 0;
+
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {/* Filters */}
       <Card padding="md">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-text-muted">filter_list</span>
+            <span className="text-sm font-semibold text-text-main">Filters</span>
+            {hasFilters && (
+              <Badge variant="primary" size="sm">{totalItems.toLocaleString()} match{totalItems === 1 ? "" : "es"}</Badge>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearFilters}
+            disabled={!hasFilters}
+            className="gap-1.5"
+          >
+            <span className="material-symbols-outlined text-[16px]">filter_alt_off</span>
+            Clear
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="provider-filter" className="text-sm font-medium text-text-main">Provider</label>
             <select
@@ -190,11 +236,10 @@ export default function RequestDetailsTab() {
               value={filters.provider}
               onChange={(e) => setFilters({ ...filters, provider: e.target.value })}
               className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
-                "w-full min-w-0 cursor-pointer"
+                "h-9 w-full min-w-0 cursor-pointer rounded-lg border border-black/10 bg-surface px-3",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 dark:border-white/10"
               )}
-              style={{ colorScheme: 'auto' }}
+              style={{ colorScheme: "auto" }}
             >
               <option value="">All Providers</option>
               {providers.map((provider) => (
@@ -204,7 +249,7 @@ export default function RequestDetailsTab() {
               ))}
             </select>
           </div>
-          
+
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="start-date-filter" className="text-sm font-medium text-text-main">Start Date</label>
             <input
@@ -213,9 +258,10 @@ export default function RequestDetailsTab() {
               value={filters.startDate}
               onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
               className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
+                "h-9 w-full min-w-0 rounded-lg border border-black/10 bg-surface px-3",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 dark:border-white/10"
               )}
+              style={{ colorScheme: "auto" }}
             />
           </div>
 
@@ -227,104 +273,136 @@ export default function RequestDetailsTab() {
               value={filters.endDate}
               onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
               className={cn(
-                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
+                "h-9 w-full min-w-0 rounded-lg border border-black/10 bg-surface px-3",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 dark:border-white/10"
               )}
+              style={{ colorScheme: "auto" }}
             />
-          </div>
-          
-          <div className="flex min-w-0 flex-col gap-2 sm:col-span-2 lg:col-span-1">
-            <span className="hidden text-sm font-medium text-text-main opacity-0 lg:block" aria-hidden="true">Clear</span>
-            <Button 
-              variant="ghost" 
-              onClick={handleClearFilters}
-              disabled={!filters.provider && !filters.startDate && !filters.endDate}
-              className="w-full"
-            >
-              Clear Filters
-            </Button>
           </div>
         </div>
       </Card>
 
-      <Card padding="none">
+      {/* Request table */}
+      <Card padding="none" className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/5 px-5 py-4 dark:border-white/5">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-text-muted">receipt_long</span>
+            <span className="text-sm font-semibold text-text-main">Request logs</span>
+          </div>
+          <span className="text-xs text-text-muted">
+            {totalItems.toLocaleString()} request{totalItems === 1 ? "" : "s"} · newest first
+          </span>
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px]">
+          <table className="w-full min-w-[1000px]">
             <thead>
-              <tr className="border-b border-black/5 dark:border-white/5">
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
-                <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
+              <tr className="border-b border-black/5 text-left dark:border-white/5">
+                <th className="p-4 text-xs font-semibold uppercase tracking-wide text-text-muted">Time</th>
+                <th className="p-4 text-xs font-semibold uppercase tracking-wide text-text-muted">Status</th>
+                <th className="p-4 text-xs font-semibold uppercase tracking-wide text-text-muted">Model</th>
+                <th className="p-4 text-xs font-semibold uppercase tracking-wide text-text-muted">Provider</th>
+                <th className="p-4 text-right text-xs font-semibold uppercase tracking-wide text-text-muted">Input</th>
+                <th className="p-4 text-right text-xs font-semibold uppercase tracking-wide text-text-muted">Cached</th>
+                <th className="p-4 text-right text-xs font-semibold uppercase tracking-wide text-text-muted">Cache %</th>
+                <th className="p-4 text-right text-xs font-semibold uppercase tracking-wide text-text-muted">Output</th>
+                <th className="p-4 text-center text-xs font-semibold uppercase tracking-wide text-text-muted">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="9" className="p-10 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
-                      Loading...
+                      Loading requests…
                     </div>
                   </td>
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
-                    No request details found
+                  <td colSpan="9" className="p-12">
+                    <div className="flex flex-col items-center gap-2 text-center">
+                      <span className="material-symbols-outlined text-[40px] text-text-muted/50">inbox</span>
+                      <span className="text-sm font-medium text-text-main">No requests found</span>
+                      <span className="max-w-sm text-xs text-text-muted">
+                        {hasFilters
+                          ? "No requests match the current filters. Try clearing them."
+                          : "Requests will appear here as soon as traffic flows through Mirai."}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               ) : (
-                details.map((detail, index) => (
-                  <tr
-                    key={`${detail.id}-${index}`}
-                    className="border-b border-black/5 dark:border-white/5 last:border-b-0 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors"
-                  >
-                    <td className="whitespace-nowrap p-4 text-sm text-text-main">
-                      {new Date(detail.timestamp).toLocaleString()}
-                    </td>
-                    <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main">
-                      {detail.model}
-                    </td>
-                    <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
-                       <span className="font-medium">
-                         {getProviderName(detail.provider, providerNameCache)}
-                       </span>
-                     </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {getInputTokens(detail.tokens).toLocaleString()}
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {getCachedTokens(detail.tokens) > 0 ? getCachedTokens(detail.tokens).toLocaleString() : "—"}
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {getCacheCreationTokens(detail.tokens) > 0 ? getCacheCreationTokens(detail.tokens).toLocaleString() : "—"}
-                    </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {detail.tokens?.completion_tokens?.toLocaleString() || 0}
-                    </td>
-                    <td className="p-4 text-sm text-text-muted">
-                      <div className="flex flex-col gap-0.5">
-                        <div>TTFT: <span className="font-mono">{detail.latency?.ttft || 0}ms</span></div>
-                        <div>Total: <span className="font-mono">{detail.latency?.total || 0}ms</span></div>
-                      </div>
-                    </td>
-                    <td className="p-4 text-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewDetail(detail)}
-                      >
-                        Detail
-                      </Button>
-                    </td>
-                  </tr>
-                ))
+                details.map((detail, index) => {
+                  const meta = statusMeta(detail.status);
+                  const inputTokens = getInputTokens(detail.tokens);
+                  const cachedTokens = getCachedTokens(detail.tokens);
+                  const cacheCreation = getCacheCreationTokens(detail.tokens);
+                  const outputTokens = detail.tokens?.completion_tokens || 0;
+                  const ratio = cacheRatio(detail.tokens);
+                  const latency = detail.latency || {};
+                  return (
+                    <tr
+                      key={`${detail.id}-${index}`}
+                      className="border-b border-black/5 transition-colors last:border-b-0 hover:bg-black/[0.02] dark:border-white/5 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="whitespace-nowrap p-4 text-sm text-text-main">
+                        <div>{new Date(detail.timestamp).toLocaleDateString()}</div>
+                        <div className="font-mono text-xs text-text-muted">
+                          {new Date(detail.timestamp).toLocaleTimeString()}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <Badge variant={meta.variant} size="sm" dot>{meta.label}</Badge>
+                      </td>
+                      <td className="max-w-[240px] truncate p-4 font-mono text-sm text-text-main">
+                        {detail.model || "—"}
+                      </td>
+                      <td className="max-w-[170px] truncate p-4 text-sm text-text-main">
+                        {getProviderName(detail.provider, providerNameCache)}
+                      </td>
+                      <td className="p-4 text-right font-mono text-sm text-text-main">
+                        {formatNumber(inputTokens)}
+                        {cacheCreation > 0 && (
+                          <div className="text-[11px] text-text-muted">+{formatNumber(cacheCreation)} cache</div>
+                        )}
+                      </td>
+                      <td className="p-4 text-right font-mono text-sm">
+                        {cachedTokens > 0
+                          ? <span className="text-primary">{formatNumber(cachedTokens)}</span>
+                          : <span className="text-text-muted">—</span>}
+                      </td>
+                      <td className="p-4 text-right">
+                        {cachedTokens > 0 ? (
+                          <span className="inline-flex items-center gap-2">
+                            <span className="hidden h-1.5 w-12 overflow-hidden rounded-full bg-surface-2 sm:inline-block">
+                              <span className="block h-full rounded-full bg-primary" style={{ width: `${ratio}%` }} />
+                            </span>
+                            <span className="font-mono text-xs text-text-muted">{ratio}%</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-text-muted">—</span>
+                        )}
+                      </td>
+                      <td className="p-4 text-right font-mono text-sm text-text-main">
+                        {formatNumber(outputTokens)}
+                      </td>
+                      <td className="p-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          {(latency.total > 0 || latency.ttft > 0) && (
+                            <span className="hidden font-mono text-[11px] text-text-muted md:inline">
+                              {latency.total > 0 ? `${latency.total}ms` : `${latency.ttft}ms ttft`}
+                            </span>
+                          )}
+                          <Button variant="outline" size="sm" onClick={() => handleViewDetail(detail)}>
+                            Detail
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -351,65 +429,42 @@ export default function RequestDetailsTab() {
       >
         {selectedDetail && (
           <div className="space-y-6">
-            <div className="grid min-w-0 grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-              <div>
-                <span className="text-text-muted">ID:</span>{" "}
-                <span className="break-all font-mono text-text-main">{selectedDetail.id}</span>
-              </div>
-              <div>
-                <span className="text-text-muted">Timestamp:</span>{" "}
-                <span className="text-text-main">{new Date(selectedDetail.timestamp).toLocaleString()}</span>
-              </div>
-              <div>
-                 <span className="text-text-muted">Provider:</span>{" "}
-                 <span className="text-text-main font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
-               </div>
-              <div>
-                <span className="text-text-muted">Model:</span>{" "}
-                <span className="text-text-main font-mono">{selectedDetail.model}</span>
-              </div>
-              <div>
-                <span className="text-text-muted">Status:</span>{" "}
-                <span className={cn(
-                  "font-medium",
-                  selectedDetail.status === "success" ? "text-green-600" : "text-red-600"
-                )}>
-                  {selectedDetail.status}
-                </span>
-              </div>
-              <div>
-                <span className="text-text-muted">Latency:</span>{" "}
-                <span className="text-text-main font-mono">
-                  TTFT {selectedDetail.latency?.ttft || 0}ms / Total {selectedDetail.latency?.total || 0}ms
-                </span>
-              </div>
-              <div>
-                <span className="text-text-muted">Input Tokens:</span>{" "}
-                <span className="text-text-main font-mono">
-                  {getInputTokens(selectedDetail.tokens).toLocaleString()}
-                </span>
-              </div>
-              {getCachedTokens(selectedDetail.tokens) > 0 && (
-                <div>
-                  <span className="text-text-muted">Cached Tokens:</span>{" "}
-                  <span className="text-text-main font-mono">
-                    {getCachedTokens(selectedDetail.tokens).toLocaleString()}
-                  </span>
+            {/* Summary */}
+            <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
+              {[
+                ["Timestamp", new Date(selectedDetail.timestamp).toLocaleString(), false],
+                ["Provider", getProviderName(selectedDetail.provider, providerNameCache), false],
+                ["Model", selectedDetail.model || "—", true],
+                ["Input tokens", formatNumber(getInputTokens(selectedDetail.tokens)), true],
+                ["Cached tokens", getCachedTokens(selectedDetail.tokens) > 0 ? formatNumber(getCachedTokens(selectedDetail.tokens)) : "—", true],
+                ["Output tokens", formatNumber(selectedDetail.tokens?.completion_tokens || 0), true],
+              ].map(([label, value, mono]) => (
+                <div key={label} className="min-w-0 rounded-lg border border-black/5 bg-black/[0.02] p-3 dark:border-white/5 dark:bg-white/[0.02]">
+                  <div className="text-[11px] uppercase tracking-wide text-text-muted">{label}</div>
+                  <div className={cn("mt-0.5 truncate text-sm text-text-main", mono && "font-mono")}>{value}</div>
                 </div>
-              )}
+              ))}
+              <div className="min-w-0 rounded-lg border border-black/5 bg-black/[0.02] p-3 dark:border-white/5 dark:bg-white/[0.02]">
+                <div className="text-[11px] uppercase tracking-wide text-text-muted">Status</div>
+                <div className="mt-1"><Badge variant={statusMeta(selectedDetail.status).variant} size="sm" dot>{statusMeta(selectedDetail.status).label}</Badge></div>
+              </div>
               {getCacheCreationTokens(selectedDetail.tokens) > 0 && (
-                <div>
-                  <span className="text-text-muted">Cache Creation:</span>{" "}
-                  <span className="text-text-main font-mono">
-                    {getCacheCreationTokens(selectedDetail.tokens).toLocaleString()}
-                  </span>
+                <div className="min-w-0 rounded-lg border border-black/5 bg-black/[0.02] p-3 dark:border-white/5 dark:bg-white/[0.02]">
+                  <div className="text-[11px] uppercase tracking-wide text-text-muted">Cache creation</div>
+                  <div className="mt-0.5 font-mono text-sm text-text-main">{formatNumber(getCacheCreationTokens(selectedDetail.tokens))}</div>
                 </div>
               )}
-              <div>
-                <span className="text-text-muted">Output Tokens:</span>{" "}
-                <span className="text-text-main font-mono">
-                  {selectedDetail.tokens?.completion_tokens?.toLocaleString() || 0}
-                </span>
+              {(selectedDetail.latency?.total > 0 || selectedDetail.latency?.ttft > 0) && (
+                <div className="min-w-0 rounded-lg border border-black/5 bg-black/[0.02] p-3 dark:border-white/5 dark:bg-white/[0.02]">
+                  <div className="text-[11px] uppercase tracking-wide text-text-muted">Latency</div>
+                  <div className="mt-0.5 font-mono text-sm text-text-main">
+                    {selectedDetail.latency?.total > 0 ? `${selectedDetail.latency.total}ms` : `${selectedDetail.latency?.ttft || 0}ms ttft`}
+                  </div>
+                </div>
+              )}
+              <div className="col-span-2 min-w-0 rounded-lg border border-black/5 bg-black/[0.02] p-3 sm:col-span-3 dark:border-white/5 dark:bg-white/[0.02]">
+                <div className="text-[11px] uppercase tracking-wide text-text-muted">ID</div>
+                <div className="mt-0.5 break-all font-mono text-xs text-text-main">{selectedDetail.id}</div>
               </div>
             </div>
 
@@ -455,53 +510,71 @@ export default function RequestDetailsTab() {
               </div>
             )}
 
-            <div className="space-y-4">
-              <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {JSON.stringify(selectedDetail.request, null, 2)}
-                </pre>
-              </CollapsibleSection>
-
-              {selectedDetail.providerRequest && (
-                <CollapsibleSection title="2. Provider Request (Translated)" icon="translate">
-                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                    {JSON.stringify(selectedDetail.providerRequest, null, 2)}
-                  </pre>
-                </CollapsibleSection>
-              )}
-
-              {selectedDetail.providerResponse && (
-                <CollapsibleSection title="3. Provider Response (Raw)" icon="data_object">
-                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                    {typeof selectedDetail.providerResponse === 'object'
-                      ? JSON.stringify(selectedDetail.providerResponse, null, 2)
-                      : selectedDetail.providerResponse
-                    }
-                  </pre>
-                </CollapsibleSection>
-              )}
-              
-              <CollapsibleSection title="4. Client Response (Final)" defaultOpen={true} icon="output">
-                {selectedDetail.response?.thinking && (
-                  <div className="mb-4">
-                    <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
-                      <span className="material-symbols-outlined text-[16px]">psychology</span>
-                      Thinking Process
-                    </h4>
-                    <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
-                      {selectedDetail.response.thinking}
+            {selectedDetail.request || selectedDetail.providerResponse || selectedDetail.response ? (
+              <div className="space-y-4">
+                {selectedDetail.request && (
+                  <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {JSON.stringify(selectedDetail.request, null, 2)}
                     </pre>
-                  </div>
+                  </CollapsibleSection>
                 )}
-                
-                <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
-                  Content
-                </h4>
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {selectedDetail.response?.content || "[No content]"}
-                </pre>
-              </CollapsibleSection>
-            </div>
+
+                {selectedDetail.providerRequest && (
+                  <CollapsibleSection title="2. Provider Request (Translated)" icon="translate">
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {JSON.stringify(selectedDetail.providerRequest, null, 2)}
+                    </pre>
+                  </CollapsibleSection>
+                )}
+
+                {selectedDetail.providerResponse && (
+                  <CollapsibleSection title="3. Provider Response (Raw)" icon="data_object">
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {typeof selectedDetail.providerResponse === "object"
+                        ? JSON.stringify(selectedDetail.providerResponse, null, 2)
+                        : selectedDetail.providerResponse
+                      }
+                    </pre>
+                  </CollapsibleSection>
+                )}
+
+                {selectedDetail.response && (
+                  <CollapsibleSection title="4. Client Response (Final)" defaultOpen={true} icon="output">
+                    {selectedDetail.response?.thinking && (
+                      <div className="mb-4">
+                        <h4 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-text-main opacity-70">
+                          <span className="material-symbols-outlined text-[16px]">psychology</span>
+                          Thinking Process
+                        </h4>
+                        <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
+                          {selectedDetail.response.thinking}
+                        </pre>
+                      </div>
+                    )}
+
+                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-main opacity-70">
+                      Content
+                    </h4>
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {selectedDetail.response?.content || "[No content]"}
+                    </pre>
+                  </CollapsibleSection>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-start gap-3 rounded-lg border border-black/5 bg-black/[0.02] p-4 dark:border-white/5 dark:bg-white/[0.02]">
+                <span className="material-symbols-outlined text-[20px] text-text-muted">info</span>
+                <div className="text-sm">
+                  <p className="font-medium text-text-main">Metadata only</p>
+                  <p className="mt-0.5 text-text-muted">
+                    Full request/response payloads aren&apos;t stored for this row. Enable{" "}
+                    <span className="font-medium text-text-main">Observability</span> in Settings → General to capture
+                    conversation bodies and latency.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Drawer>

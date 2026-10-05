@@ -4,6 +4,27 @@ import { PROVIDER_MEDIA } from "../../providers/index.js";
 
 const BASE_URL = PROVIDER_MEDIA["gemini"]?.imageConfig?.baseUrl;
 
+// Turn a client-supplied image reference (data URL, raw base64, or http URL)
+// into a Gemini inline_data part so the model can edit/continue from it.
+function toInlineData(image) {
+  if (!image || typeof image !== "string") return null;
+
+  const dataUrl = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (dataUrl) return { mimeType: dataUrl[1], data: dataUrl[2] };
+
+  // bare base64 (no data: prefix)
+  if (/^[A-Za-z0-9+/=\s]+$/.test(image) && image.replace(/\s/g, "").length >= 40) {
+    return { mimeType: "image/png", data: image.replace(/\s/g, "") };
+  }
+
+  // remote URL → let Gemini fetch it directly
+  if (/^https?:\/\//.test(image)) {
+    return { fileData: { mimeType: "image/png", fileUri: image } };
+  }
+
+  return null;
+}
+
 export default {
   buildUrl: (model, creds) => {
     const apiKey = creds?.apiKey || creds?.accessToken;
@@ -11,10 +32,16 @@ export default {
     return `${BASE_URL}/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`;
   },
   buildHeaders: () => ({ "Content-Type": "application/json" }),
-  buildBody: (_model, body) => ({
-    contents: [{ parts: [{ text: body.prompt }] }],
-    generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-  }),
+  buildBody: (_model, body) => {
+    const parts = [{ text: body.prompt }];
+    const inline = toInlineData(body.image);
+    if (inline?.fileData) parts.push({ fileData: inline.fileData });
+    else if (inline) parts.push({ inlineData: inline });
+    return {
+      contents: [{ parts }],
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+    };
+  },
   normalize: (responseBody, prompt) => {
     const parts = responseBody.candidates?.[0]?.content?.parts || [];
     const images = parts.filter((p) => p.inlineData?.data).map((p) => ({ b64_json: p.inlineData.data }));

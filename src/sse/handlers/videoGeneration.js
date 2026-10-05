@@ -134,7 +134,16 @@ export async function handleVideoCreate(request, action) {
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
 
-    if (!credentials || credentials.allRateLimited) {
+    if (!credentials || credentials.allRateLimited || credentials.allUnavailable) {
+      if (credentials?.allUnavailable) {
+        const parts = [];
+        if (credentials.errorCount) parts.push(`${credentials.errorCount} error/expired`);
+        if (credentials.rateLimitedCount) parts.push(`${credentials.rateLimitedCount} rate limited`);
+        const detail = parts.length ? parts.join(", ") : "0 healthy";
+        const msg = `[${provider}/${model || "video"}] No healthy accounts — ${detail} (run Test to recover)`;
+        log.warn("VIDEO", msg);
+        return unavailableResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, msg, null, null);
+      }
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;

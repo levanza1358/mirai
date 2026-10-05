@@ -59,19 +59,43 @@ const antigravity = {
     // Load Code Assist to get project ID and tier
     let projectId = "";
     let tierId = "legacy-tier";
+    let tierName = "";
     try {
       const loadRes = await fetch(ANTIGRAVITY_CONFIG.loadCodeAssistEndpoint, {
         method: "POST",
         headers: loadHeaders,
-        body: JSON.stringify({ metadata }),
+        // `mode: 1` is required: without it the API returns only
+        // allowedTiers/ineligibleTiers and omits paidTier/currentTier, which
+        // made accounts fall back to the free-tier display label.
+        body: JSON.stringify({ metadata, mode: 1 }),
       });
       if (loadRes.ok) {
         const data = await loadRes.json();
         projectId = data.cloudaicompanionProject?.id || data.cloudaicompanionProject || "";
-        if (Array.isArray(data.allowedTiers)) {
+
+        // The real subscription lives on `paidTier` (e.g. {id:"g1-pro-tier",
+        // name:"Google AI Pro"}). `currentTier` is misleading: for paid accounts
+        // it still reports the generic product label ("Antigravity") with a
+        // free-tier id. Fall back to Free when there is no paidTier.
+        const paidTier = data.paidTier || null;
+        const currentTier = data.currentTier || null;
+
+        if (paidTier?.id) tierId = String(paidTier.id).trim();
+        else if (currentTier?.id) tierId = String(currentTier.id).trim();
+
+        if (paidTier?.name) tierName = String(paidTier.name).trim();
+        else if (currentTier?.id && currentTier.id !== "free-tier" && currentTier.name) {
+          tierName = String(currentTier.name).trim();
+        } else if (currentTier || paidTier || Array.isArray(data.allowedTiers)) {
+          // No paid subscription on this account → it is on the free tier.
+          tierName = "Free";
+        }
+
+        if (!tierName && Array.isArray(data.allowedTiers)) {
           for (const tier of data.allowedTiers) {
-            if (tier.isDefault && tier.id) {
-              tierId = tier.id.trim();
+            if (tier.isDefault && tier.name) {
+              tierName = String(tier.name).trim();
+              if (!paidTier?.id && !currentTier?.id && tier.id) tierId = String(tier.id).trim();
               break;
             }
           }
@@ -104,7 +128,7 @@ const antigravity = {
       doOnboard().catch(() => {});
     }
 
-    return { userInfo, projectId };
+    return { userInfo, projectId, tierId, tierName };
   },
   mapTokens: (tokens, extra) => ({
     accessToken: tokens.access_token,
@@ -113,6 +137,10 @@ const antigravity = {
     scope: tokens.scope,
     email: extra?.userInfo?.email,
     projectId: extra?.projectId,
+    providerSpecificData: {
+      ...(extra?.tierId ? { tierId: extra.tierId } : {}),
+      ...(extra?.tierName ? { tierName: extra.tierName } : {}),
+    },
   }),
 };
 

@@ -87,7 +87,16 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
-    if (!credentials || credentials.allRateLimited) {
+    if (!credentials || credentials.allRateLimited || credentials.allUnavailable) {
+      if (credentials?.allUnavailable) {
+        const parts = [];
+        if (credentials.errorCount) parts.push(`${credentials.errorCount} error/expired`);
+        if (credentials.rateLimitedCount) parts.push(`${credentials.rateLimitedCount} rate limited`);
+        const detail = parts.length ? parts.join(", ") : "0 healthy";
+        const msg = `[${provider}/${model}] No healthy accounts — ${detail} (run Test to recover)`;
+        log.warn("TTS", msg);
+        return unavailableResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, msg, null, null);
+      }
       if (credentials?.allRateLimited) {
         const msg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;

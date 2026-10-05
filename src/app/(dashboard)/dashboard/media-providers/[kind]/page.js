@@ -19,7 +19,37 @@ function getEffectiveStatus(conn) {
   return conn.testStatus === "unavailable" && !isCooldown ? "active" : conn.testStatus;
 }
 
-function MediaProviderCard({ provider, kind, connections, isCustom, onToggle }) {
+// A provider counts as "active" when it has at least one usable connection
+// (or is a no-auth provider that is always ready). Everything else
+// (no connections yet, all disabled, only errored connections) is inactive.
+export function isProviderActive(providerId, connections) {
+  const info = AI_PROVIDERS[providerId];
+  if (info?.noAuth) return true;
+  const conns = connections.filter((c) => c.provider === providerId);
+  if (conns.length === 0) return false;
+  if (conns.every((c) => c.isActive === false)) return false;
+  return conns.some((c) => {
+    const s = getEffectiveStatus(c);
+    return s === "active" || s === "success";
+  });
+}
+
+function ProviderGroup({ label, items, renderCard }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</span>
+        <span className="text-[10px] font-medium rounded-full bg-surface-2 text-text-muted px-2 py-0.5">{items.length}</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {items.map(renderCard)}
+      </div>
+    </div>
+  );
+}
+
+function MediaProviderCard({ provider, kind, connections, isCustom, onToggle, dimmed }) {
   const providerInfo = AI_PROVIDERS[provider.id];
   const isNoAuth = !!providerInfo?.noAuth;
 
@@ -28,6 +58,7 @@ function MediaProviderCard({ provider, kind, connections, isCustom, onToggle }) 
   const error = providerConns.filter((c) => { const s = getEffectiveStatus(c); return s === "error" || s === "expired" || s === "unavailable"; }).length;
   const total = providerConns.length;
   const allDisabled = total > 0 && providerConns.every((c) => c.isActive === false);
+  const isDimmed = dimmed ?? allDisabled;
 
   const handleToggleClick = (e) => {
     e.preventDefault();
@@ -52,7 +83,7 @@ function MediaProviderCard({ provider, kind, connections, isCustom, onToggle }) 
     <Link href={`/dashboard/media-providers/${kind}/${provider.id}`} className="group">
       <Card
         padding="xs"
-        className={`h-full hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors cursor-pointer ${allDisabled ? "opacity-50" : ""}`}
+        className={`h-full transition-all cursor-pointer ${isDimmed ? "opacity-60 grayscale bg-black/[0.02] dark:bg-white/[0.02] hover:opacity-80" : "hover:bg-black/[0.01] dark:hover:bg-white/[0.01]"}`}
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -191,6 +222,21 @@ export default function MediaProviderKindPage() {
 
   const allProviders = [...providers, ...customProviders];
 
+  const activeProviders = allProviders.filter((p) => isProviderActive(p.id, connections));
+  const inactiveProviders = allProviders.filter((p) => !isProviderActive(p.id, connections));
+
+  const renderMediaCard = (provider, dimmed) => (
+    <MediaProviderCard
+      key={provider.id}
+      provider={provider}
+      kind={kind}
+      connections={connections}
+      isCustom={customProviders.some((c) => c.id === provider.id)}
+      onToggle={handleToggleProvider}
+      dimmed={dimmed}
+    />
+  );
+
   const handleToggleProvider = async (providerId, newActive) => {
     const providerConns = connections.filter((c) => c.provider === providerId);
     setConnections((prev) =>
@@ -251,26 +297,17 @@ export default function MediaProviderKindPage() {
           No providers support <strong>{kindConfig.label}</strong> yet.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {providers.map((provider) => (
-            <MediaProviderCard
-              key={provider.id}
-              provider={provider}
-              kind={kind}
-              connections={connections}
-              onToggle={handleToggleProvider}
-            />
-          ))}
-          {customProviders.map((provider) => (
-            <MediaProviderCard
-              key={provider.id}
-              provider={provider}
-              kind={kind}
-              connections={connections}
-              isCustom
-              onToggle={handleToggleProvider}
-            />
-          ))}
+        <div className="flex flex-col gap-6">
+          <ProviderGroup
+            label="Active"
+            items={activeProviders}
+            renderCard={(p) => renderMediaCard(p, false)}
+          />
+          <ProviderGroup
+            label="Inactive / No connection"
+            items={inactiveProviders}
+            renderCard={(p) => renderMediaCard(p, true)}
+          />
         </div>
       )}
 

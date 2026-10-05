@@ -22,18 +22,33 @@ import {
 } from "@/shared/constants/providers";
 import Link from "next/link";
 import { getErrorCode, getRelativeTime } from "@/shared/utils";
+import { classifyConnection } from "@/shared/utils/accountBuckets";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 import AddCompatibleModal from "./components/AddCompatibleModal";
 import { STATUS_FILTER_OPTIONS, matchesStatusFilter } from "./utils";
 
-function getStatusDisplay(connected, error, errorCode) {
+function isProviderInactive(stats, isNoAuth) {
+  if (isNoAuth) return false;
+  if (stats.allDisabled) return true;
+  if (stats.connected > 0) return false;
+  return true; // has connections but none active, or no connections at all
+}
+
+function getStatusDisplay(connected, rateLimited, error, errorCode) {
   const parts = [];
   if (connected > 0) {
     parts.push(
       <Badge key="connected" variant="success" size="sm" dot>
-        {connected} Connected
+        {connected} Active
+      </Badge>,
+    );
+  }
+  if (rateLimited > 0) {
+    parts.push(
+      <Badge key="rateLimited" variant="warning" size="sm" dot>
+        {rateLimited} Rate Limited
       </Badge>,
     );
   }
@@ -94,6 +109,31 @@ function getConnectionErrorTag(connection) {
 
   return "ERR";
 }
+
+function ProviderGroup({ label, items, renderCard }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          {label}
+        </span>
+        <span className="rounded-full bg-black/5 px-1.5 text-[11px] font-medium text-text-muted dark:bg-white/10">
+          {items.length}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+        {items.map(renderCard)}
+      </div>
+    </div>
+  );
+}
+
+ProviderGroup.propTypes = {
+  label: PropTypes.string.isRequired,
+  items: PropTypes.array.isRequired,
+  renderCard: PropTypes.func.isRequired,
+};
 
 const APIKEY_INITIAL_VISIBLE = 20;
 
@@ -177,27 +217,17 @@ export default function ProvidersPage() {
       (c) => c.provider === providerId && authTypes.includes(c.authType),
     );
 
-    const getEffectiveStatus = (conn) => {
-      const isCooldown = Object.entries(conn).some(
-        ([k, v]) =>
-          k.startsWith("modelLock_") && v && new Date(v).getTime() > Date.now(),
-      );
-      return conn.testStatus === "unavailable" && !isCooldown
-        ? "active"
-        : conn.testStatus;
-    };
-
-    const connected = providerConnections.filter((c) => {
-      const status = getEffectiveStatus(c);
-      return status === "active" || status === "success";
-    }).length;
-
-    const errorConns = providerConnections.filter((c) => {
-      const status = getEffectiveStatus(c);
-      return (
-        status === "error" || status === "expired" || status === "unavailable"
-      );
-    });
+    // Single source of truth for account health (see shared/utils/accountBuckets).
+    // classifyConnection → "active" | "rateLimited" | "error".
+    let connected = 0;
+    let rateLimited = 0;
+    const errorConns = [];
+    for (const c of providerConnections) {
+      const bucket = classifyConnection(c);
+      if (bucket === "rateLimited") rateLimited += 1;
+      else if (bucket === "error") errorConns.push(c);
+      else connected += 1;
+    }
 
     const error = errorConns.length;
     const total = providerConnections.length;
@@ -212,7 +242,7 @@ export default function ProvidersPage() {
       ? getRelativeTime(latestError.lastErrorAt)
       : null;
 
-    return { connected, error, total, errorCode, errorTime, allDisabled };
+    return { connected, rateLimited, error, total, errorCode, errorTime, allDisabled };
   };
 
   const matchStatus = (stats, isNoAuth) =>
@@ -452,21 +482,56 @@ export default function ProvidersPage() {
             <span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            {[...compatibleProviders, ...anthropicCompatibleProviders].map(
-              (info) => (
-                <ApiKeyProviderCard
-                  key={info.id}
-                  providerId={info.id}
-                  provider={info}
-                  stats={getProviderStats(info.id, "apikey")}
-                  authType="compatible"
-                  onToggle={(active) =>
-                    handleToggleProvider(info.id, "apikey", active)
-                  }
-                />
-              ),
-            )}
+          <div className="flex flex-col gap-4">
+            {(() => {
+              const compatibleAll = [
+                ...compatibleProviders,
+                ...anthropicCompatibleProviders,
+              ];
+              const activeCompatible = compatibleAll.filter(
+                (info) =>
+                  !isProviderInactive(
+                    getProviderStats(info.id, "apikey"),
+                    info.noAuth,
+                  ),
+              );
+              const inactiveCompatible = compatibleAll.filter((info) =>
+                isProviderInactive(
+                  getProviderStats(info.id, "apikey"),
+                  info.noAuth,
+                ),
+              );
+              const renderCompatible = (info) => {
+                const stats = getProviderStats(info.id, "apikey");
+                return (
+                  <ApiKeyProviderCard
+                    key={info.id}
+                    providerId={info.id}
+                    provider={info}
+                    stats={stats}
+                    authType="compatible"
+                    dimmed={isProviderInactive(stats, info.noAuth)}
+                    onToggle={(active) =>
+                      handleToggleProvider(info.id, "apikey", active)
+                    }
+                  />
+                );
+              };
+              return (
+                <>
+                  <ProviderGroup
+                    label="Active"
+                    items={activeCompatible}
+                    renderCard={renderCompatible}
+                  />
+                  <ProviderGroup
+                    label="Inactive / No connection"
+                    items={inactiveCompatible}
+                    renderCard={renderCompatible}
+                  />
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -500,20 +565,45 @@ export default function ProvidersPage() {
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {oauthEntries.map(([key, info]) => {
-            const authTypes = dualAuthTypes(info, key);
-            return (
-              <ProviderCard
-                key={key}
-                providerId={key}
-                provider={info}
-                stats={getProviderStats(key, authTypes)}
-                authType="oauth"
-                onToggle={(active) => handleToggleProvider(key, authTypes, active)}
-              />
-            );
-          })}
+        <div className="flex flex-col gap-4">
+          {[
+            oauthEntries.filter(
+              ([key, info]) =>
+                !isProviderInactive(
+                  getProviderStats(key, dualAuthTypes(info, key)),
+                  info.noAuth,
+                ),
+            ),
+            oauthEntries.filter(([key, info]) =>
+              isProviderInactive(
+                getProviderStats(key, dualAuthTypes(info, key)),
+                info.noAuth,
+              ),
+            ),
+          ].map((group, gi) => (
+            <ProviderGroup
+              key={gi}
+              label={gi === 0 ? "Active" : "Inactive / No connection"}
+              items={group}
+              renderCard={([key, info]) => {
+                const authTypes = dualAuthTypes(info, key);
+                const stats = getProviderStats(key, authTypes);
+                return (
+                  <ProviderCard
+                    key={key}
+                    providerId={key}
+                    provider={info}
+                    stats={stats}
+                    authType="oauth"
+                    dimmed={isProviderInactive(stats, info.noAuth)}
+                    onToggle={(active) =>
+                      handleToggleProvider(key, authTypes, active)
+                    }
+                  />
+                );
+              }}
+            />
+          ))}
         </div>
       </div>
       )}
@@ -544,37 +634,62 @@ export default function ProvidersPage() {
             {testingMode === "free" ? "Testing..." : "Test All"}
           </button>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {freeEntries.map(([key, info]) => {
-            // Dual-auth (e.g. kiro): count/toggle oauth + apikey/api_key so the
-            // card total matches the provider detail page.
-            const freeAuthTypes = dualAuthTypes(info, key);
-            return (
-              <ProviderCard
-                key={key}
-                providerId={key}
-                provider={info}
-                stats={getProviderStats(key, freeAuthTypes)}
-                authType="free"
-                onToggle={(active) =>
-                  handleToggleProvider(key, freeAuthTypes, active)
-                }
-              />
+        <div className="flex flex-col gap-4">
+          {(() => {
+            const freeCombined = [
+              ...freeEntries.map(([key, info]) => ({ key, info, card: "provider" })),
+              ...freeTierEntries.map(([key, info]) => ({ key, info, card: "apikey" })),
+            ];
+            const activeFree = freeCombined.filter(
+              (e) => !isProviderInactive(getProviderStats(e.key, dualAuthTypes(e.info, e.key)), e.info.noAuth),
             );
-          })}
-          {freeTierEntries.map(([key, info]) => {
-            const freeAuthTypes = dualAuthTypes(info, key);
-            return (
-              <ApiKeyProviderCard
-                key={key}
-                providerId={key}
-                provider={info}
-                stats={getProviderStats(key, freeAuthTypes)}
-                authType={Array.isArray(freeAuthTypes) ? (freeAuthTypes[0] ?? "apikey") : freeAuthTypes}
-                onToggle={(active) => handleToggleProvider(key, freeAuthTypes, active)}
-              />
+            const inactiveFree = freeCombined.filter(
+              (e) => isProviderInactive(getProviderStats(e.key, dualAuthTypes(e.info, e.key)), e.info.noAuth),
             );
-          })}
+            const renderFree = (e) => {
+              const freeAuthTypes = dualAuthTypes(e.info, e.key);
+              const stats = getProviderStats(e.key, freeAuthTypes);
+              const dimmed = isProviderInactive(stats, e.info.noAuth);
+              if (e.card === "apikey") {
+                return (
+                  <ApiKeyProviderCard
+                    key={e.key}
+                    providerId={e.key}
+                    provider={e.info}
+                    stats={stats}
+                    authType={Array.isArray(freeAuthTypes) ? (freeAuthTypes[0] ?? "apikey") : freeAuthTypes}
+                    dimmed={dimmed}
+                    onToggle={(active) => handleToggleProvider(e.key, freeAuthTypes, active)}
+                  />
+                );
+              }
+              return (
+                <ProviderCard
+                  key={e.key}
+                  providerId={e.key}
+                  provider={e.info}
+                  stats={stats}
+                  authType="free"
+                  dimmed={dimmed}
+                  onToggle={(active) => handleToggleProvider(e.key, freeAuthTypes, active)}
+                />
+              );
+            };
+            return (
+              <>
+                <ProviderGroup
+                  label="Active"
+                  items={activeFree}
+                  renderCard={renderFree}
+                />
+                <ProviderGroup
+                  label="Inactive / No connection"
+                  items={inactiveFree}
+                  renderCard={renderFree}
+                />
+              </>
+            );
+          })()}
         </div>
       </div>
       )}
@@ -605,17 +720,44 @@ export default function ProvidersPage() {
             {testingMode === "apikey" ? "Testing..." : "Test All"}
           </button>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {visibleApikeyEntries.map(([key, info]) => (
-            <ApiKeyProviderCard
-              key={key}
-              providerId={key}
-              provider={info}
-              stats={getProviderStats(key, "apikey")}
-              authType="apikey"
-              onToggle={(active) => handleToggleProvider(key, "apikey", active)}
-            />
-          ))}
+        <div className="flex flex-col gap-4">
+          {(() => {
+            const activeApikey = visibleApikeyEntries.filter(
+              ([key, info]) =>
+                !isProviderInactive(getProviderStats(key, "apikey"), info.noAuth),
+            );
+            const inactiveApikey = visibleApikeyEntries.filter(([key, info]) =>
+              isProviderInactive(getProviderStats(key, "apikey"), info.noAuth),
+            );
+            const renderApikey = ([key, info]) => {
+              const stats = getProviderStats(key, "apikey");
+              return (
+                <ApiKeyProviderCard
+                  key={key}
+                  providerId={key}
+                  provider={info}
+                  stats={stats}
+                  authType="apikey"
+                  dimmed={isProviderInactive(stats, info.noAuth)}
+                  onToggle={(active) => handleToggleProvider(key, "apikey", active)}
+                />
+              );
+            };
+            return (
+              <>
+                <ProviderGroup
+                  label="Active"
+                  items={activeApikey}
+                  renderCard={renderApikey}
+                />
+                <ProviderGroup
+                  label="Inactive / No connection"
+                  items={inactiveApikey}
+                  renderCard={renderApikey}
+                />
+              </>
+            );
+          })()}
         </div>
         {!isApikeySearching && !showAllApikey && hiddenApikeyCount > 0 && (
           <button
@@ -727,9 +869,10 @@ export default function ProvidersPage() {
   );
 }
 
-function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
-  const { connected, error, errorCode, errorTime, allDisabled } = stats;
+function ProviderCard({ providerId, provider, stats, authType, onToggle, dimmed }) {
+  const { connected, rateLimited, error, errorCode, errorTime, allDisabled } = stats;
   const isNoAuth = !!provider.noAuth;
+  const isDimmed = dimmed ?? allDisabled;
 
   const dotColors = {
     free: "bg-green-500",
@@ -748,7 +891,11 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
     <Link href={`/dashboard/providers/${providerId}`} className="group min-w-0">
       <Card
         padding="xs"
-        className={`h-full hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors cursor-pointer ${allDisabled ? "opacity-50" : ""}`}
+        className={`h-full transition-all cursor-pointer ${
+          isDimmed
+            ? "opacity-60 grayscale bg-black/[0.02] dark:bg-white/[0.02] hover:opacity-80"
+            : "hover:bg-black/[0.01] dark:hover:bg-white/[0.01]"
+        }`}
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -785,7 +932,7 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
                   <Badge variant="success" size="sm" dot>Ready</Badge>
                 ) : (
                   <>
-                    {getStatusDisplay(connected, error, errorCode)}
+                    {getStatusDisplay(connected, rateLimited, error, errorCode)}
                     {errorTime && (
                       <span className="text-text-muted">{errorTime}</span>
                     )}
@@ -829,12 +976,14 @@ ProviderCard.propTypes = {
   }).isRequired,
   stats: PropTypes.shape({
     connected: PropTypes.number,
+    rateLimited: PropTypes.number,
     error: PropTypes.number,
     errorCode: PropTypes.string,
     errorTime: PropTypes.string,
   }).isRequired,
   authType: PropTypes.string,
   onToggle: PropTypes.func,
+  dimmed: PropTypes.bool,
 };
 
 function ApiKeyProviderCard({
@@ -843,8 +992,10 @@ function ApiKeyProviderCard({
   stats,
   authType,
   onToggle,
+  dimmed,
 }) {
-  const { connected, error, errorCode, errorTime, allDisabled } = stats;
+  const { connected, rateLimited, error, errorCode, errorTime, allDisabled } = stats;
+  const isDimmed = dimmed ?? allDisabled;
   const isCompatible = providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
   const isAnthropicCompatible = providerId.startsWith(
     ANTHROPIC_COMPATIBLE_PREFIX,
@@ -876,7 +1027,11 @@ function ApiKeyProviderCard({
     <Link href={`/dashboard/providers/${providerId}`} className="group min-w-0">
       <Card
         padding="xs"
-        className={`h-full hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors cursor-pointer ${allDisabled ? "opacity-50" : ""}`}
+        className={`h-full transition-all cursor-pointer ${
+          isDimmed
+            ? "opacity-60 grayscale bg-black/[0.02] dark:bg-white/[0.02] hover:opacity-80"
+            : "hover:bg-black/[0.01] dark:hover:bg-white/[0.01]"
+        }`}
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -911,7 +1066,7 @@ function ApiKeyProviderCard({
                   </Badge>
                 ) : (
                   <>
-                    {getStatusDisplay(connected, error, errorCode)}
+                    {getStatusDisplay(connected, rateLimited, error, errorCode)}
                     {isCompatible && (
                       <Badge variant="default" size="sm">
                         {provider.apiType === "responses"
@@ -968,17 +1123,18 @@ ApiKeyProviderCard.propTypes = {
   }).isRequired,
   stats: PropTypes.shape({
     connected: PropTypes.number,
+    rateLimited: PropTypes.number,
     error: PropTypes.number,
     errorCode: PropTypes.string,
     errorTime: PropTypes.string,
   }).isRequired,
   authType: PropTypes.string,
   onToggle: PropTypes.func,
+  dimmed: PropTypes.bool,
 };
 
 function ProviderTestResultsView({ results }) {
-  if (results.error && !results.results) {
-    return (
+  if (results.error && !results.results) {    return (
       <div className="text-center py-6">
         <span className="material-symbols-outlined text-red-500 text-[32px] mb-2 block">
           error

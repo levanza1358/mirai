@@ -250,10 +250,14 @@ async function forwardGeminiNativeRequest(request, body, model, action) {
 
   while (true) {
     const credentials = await getProviderCredentials("gemini", excludeConnectionIds, modelId);
-    if (!credentials || credentials.allRateLimited) {
-      console.log(`[GEMINI_NATIVE] exhausted model=${modelId} status=${lastStatus || Number(credentials?.lastErrorCode) || 503} error=${lastError || credentials?.lastError || "No active credentials for provider: gemini"}`);
+    if (!credentials || credentials.allRateLimited || credentials.allUnavailable) {
+      const downMsg = credentials?.allUnavailable
+        ? `No healthy accounts for gemini — ${credentials.errorCount || 0} error/expired, ${credentials.rateLimitedCount || 0} rate limited (run Test to recover)`
+        : null;
+      const message = downMsg || lastError || credentials?.lastError || "No active credentials for provider: gemini";
+      console.log(`[GEMINI_NATIVE] exhausted model=${modelId} status=${lastStatus || Number(credentials?.lastErrorCode) || 503} error=${message}`);
       return Response.json(
-        { error: { message: lastError || credentials?.lastError || "No active credentials for provider: gemini" } },
+        { error: { message } },
         { status: lastStatus || Number(credentials?.lastErrorCode) || 503 }
       );
     }

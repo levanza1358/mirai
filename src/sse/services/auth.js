@@ -3,6 +3,7 @@ import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/con
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
+import { classifyConnection } from "@/shared/utils/accountBuckets.js";
 import { getAntigravityQuotaCache } from "./antigravityQuota.js";
 import { getCodeBuddyQuotaCache, isCodeBuddyQuotaProvider } from "./codebuddyQuota.js";
 import * as log from "../utils/logger.js";
@@ -91,6 +92,11 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     // Filter out model-locked, excluded, and quota-exhausted connections.
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
+      // Only route to Healthy/Active accounts. Rate-limited (active modelLock_*
+      // / rateLimitedUntil cooldown) and error/expired accounts are left alone
+      // until their cooldown expires or a manual Test (or a later success)
+      // marks them healthy again. See shared/utils/accountBuckets.js.
+      if (classifyConnection(c) !== "active") return false;
       if (isModelLockActive(c, model)) return false;
       const enabled = c.providerSpecificData?.enabledModels;
       if (providerId === "codex" && Array.isArray(enabled) && enabled.length && requestedModel && !enabled.includes(requestedModel)) return false;
@@ -154,6 +160,28 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           lastErrorCode: earliestConn?.errorCode || null
         };
       }
+
+      // No cooldown to wait on: every candidate was filtered out because it is
+      // in the error bucket (testStatus error/expired) — those need a manual
+      // Test (or a later successful request) to become healthy again. Surface a
+      // distinct, actionable result so callers return 503 instead of a vague
+      // "no credentials".
+      const errorConns = connections.filter(c => classifyConnection(c) === "error");
+      const rateLimitedConns = connections.filter(c => classifyConnection(c) === "rateLimited");
+      if (errorConns.length > 0 || rateLimitedConns.length > 0) {
+        const latestError = [...errorConns].sort(
+          (a, b) => new Date(b.lastErrorAt || 0) - new Date(a.lastErrorAt || 0)
+        )[0];
+        log.warn("AUTH", `${provider} | no healthy accounts | error/expired=${errorConns.length} rateLimited=${rateLimitedConns.length} | lastError=${latestError?.lastError?.slice(0, 50)}`);
+        return {
+          allUnavailable: true,
+          errorCount: errorConns.length,
+          rateLimitedCount: rateLimitedConns.length,
+          lastError: latestError?.lastError || null,
+          lastErrorCode: latestError?.errorCode || null
+        };
+      }
+
       log.warn("AUTH", `${provider} | all ${connections.length} accounts unavailable`);
       return null;
     }

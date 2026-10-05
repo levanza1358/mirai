@@ -269,7 +269,15 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
     }
 
     return {
-      plan: subscriptionInfo?.currentTier?.name || "Unknown",
+      // `paidTier` is the real subscription ("Google AI Pro"); `currentTier`
+      // reports the generic product label ("Antigravity") even on paid plans.
+      plan:
+        subscriptionInfo?.paidTier?.name ||
+        (subscriptionInfo?.currentTier?.id &&
+        subscriptionInfo.currentTier.id !== "free-tier"
+          ? subscriptionInfo.currentTier.name
+          : null) ||
+        "Free",
       quotas,
       subscriptionInfo,
     };

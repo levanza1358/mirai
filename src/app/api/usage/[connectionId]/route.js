@@ -129,6 +129,39 @@ export async function refreshAndUpdateCredentials(connection, force = false, pro
 }
 
 /**
+ * Persist the subscription plan from a usage response onto the connection the
+ * first time we learn it. Only Antigravity and Codex expose a meaningful plan.
+ * Best-effort: never throws (a missing tier must not break the usage response).
+ */
+const PLAN_BACKFILL_PROVIDERS = new Set(["antigravity", "codex"]);
+async function backfillConnectionPlan(connection, usage) {
+  try {
+    if (!PLAN_BACKFILL_PROVIDERS.has(connection.provider)) return;
+    const rawPlan = typeof usage?.plan === "string" ? usage.plan.trim() : "";
+    if (!rawPlan || rawPlan.toLowerCase() === "unknown") return;
+
+    const psd = connection.providerSpecificData || {};
+    if (connection.provider === "antigravity") {
+      if (psd.tierName === rawPlan) return;
+      await updateProviderConnection(connection.id, {
+        updatedAt: new Date().toISOString(),
+        providerSpecificData: { ...psd, tierName: rawPlan },
+      });
+      return;
+    }
+    // Codex — chatgptPlanType stores lowercase plan slugs ("plus"/"pro").
+    const planValue = rawPlan.toLowerCase();
+    if (psd.chatgptPlanType === planValue) return;
+    await updateProviderConnection(connection.id, {
+      updatedAt: new Date().toISOString(),
+      providerSpecificData: { ...psd, chatgptPlanType: planValue },
+    });
+  } catch (err) {
+    console.warn(`[Usage] ${connection?.provider}: plan back-fill skipped: ${err.message}`);
+  }
+}
+
+/**
  * GET /api/usage/[connectionId] - Get usage data for a specific connection
  */
 export async function GET(request, { params }) {
@@ -200,6 +233,12 @@ export async function GET(request, { params }) {
     if (isCodeBuddyQuotaProvider(connection.provider)) {
       recordCodeBuddyUsage(connection.id, usage);
     }
+
+    // Back-fill subscription tier onto the connection the first time we learn
+    // it. Older Antigravity connections predate tier persistence, and Codex
+    // accounts imported without an id_token have no chatgptPlanType — reading
+    // the Quota tab heals both without forcing a re-login.
+    await backfillConnectionPlan(connection, usage);
 
     return Response.json(usage);
   } catch (error) {

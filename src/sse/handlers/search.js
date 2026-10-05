@@ -176,7 +176,16 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
       }
     }
 
-    if (!credentials || credentials.allRateLimited) {
+    if (!credentials || credentials.allRateLimited || credentials.allUnavailable) {
+      if (credentials?.allUnavailable) {
+        const parts = [];
+        if (credentials.errorCount) parts.push(`${credentials.errorCount} error/expired`);
+        if (credentials.rateLimitedCount) parts.push(`${credentials.rateLimitedCount} rate limited`);
+        const detail = parts.length ? parts.join(", ") : "0 healthy";
+        const msg = `[${providerId}] No healthy accounts — ${detail} (run Test to recover)`;
+        log.warn("SEARCH", msg);
+        return unavailableResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, msg, null, null);
+      }
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;

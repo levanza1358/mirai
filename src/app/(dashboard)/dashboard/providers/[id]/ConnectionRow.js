@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
 import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
+import { getConnectionPlan, getPlanBadge } from "@/shared/utils/planBadge";
 import CooldownTimer from "./CooldownTimer";
 
 export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
@@ -83,6 +84,8 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     : connection.name?.trim() && connection.displayName?.trim() && connection.name.trim() !== connection.displayName.trim()
       ? connection.displayName.trim()
       : null;
+
+  const planBadge = getPlanBadge(getConnectionPlan(connection));
 
   // Use useState + useEffect for impure Date.now() to avoid calling during render
   const [isCooldown, setIsCooldown] = useState(false);
@@ -182,6 +185,11 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </span>
             )}
             <span className="text-xs text-text-muted">#{connection.priority}</span>
+            {planBadge && (
+              <Badge variant="default" size="sm" className={planBadge.className}>
+                {planBadge.label}
+              </Badge>
+            )}
             {connection.globalPriority && (
               <span className="text-xs text-text-muted">Auto: {connection.globalPriority}</span>
             )}

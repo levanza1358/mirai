@@ -94,6 +94,9 @@ export default function ProviderDetailPage() {
   const [oneByOneCurrentConnectionId, setOneByOneCurrentConnectionId] = useState(null);
   const [oneByOneResults, setOneByOneResults] = useState({});
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
+  const [showRunModal, setShowRunModal] = useState(false);
+  const [runMode, setRunMode] = useState("test"); // "test" | "warmup"
+  const [runTarget, setRunTarget] = useState("all"); // "all" | "active" | "rateLimited" | "error"
   const stopOneByOneRef = useRef(false);
 
   // Test-all-models (sequential batch) + answer toasts.
@@ -661,11 +664,29 @@ export default function ProviderDetailPage() {
       setFetchModelsSaving(false);
     }
   };
-  const handleRunOneByOneTest = async () => {
+  // Resolve which connections a Run should cover for the chosen target.
+  const resolveRunTargetConnections = (target) => {
+    if (target === "all") return connections;
+    return connectionBuckets[target] || [];
+  };
+
+  const openRunModal = () => {
     if (oneByOneRunning || connections.length === 0) return;
+    setRunTarget("all");
+    setShowRunModal(true);
+  };
+
+  // Runs "Test Connection" (credential probe) or "Warm Up" (tiny real chat
+  // request) one-by-one over the selected target set.
+  const handleRunOneByOne = async ({ mode, target } = {}) => {
+    const runMode = mode || "test";
+    const list = resolveRunTargetConnections(target || "all");
+    if (oneByOneRunning || list.length === 0) return;
+
+    setShowRunModal(false);
 
     const queuedState = Object.fromEntries(
-      connections.map((connection) => [connection.id, { state: "queued", error: null }]),
+      list.map((connection) => [connection.id, { state: "queued", error: null }]),
     );
 
     stopOneByOneRef.current = false;
@@ -673,33 +694,44 @@ export default function ProviderDetailPage() {
     setOneByOneStopping(false);
     setOneByOneCurrentConnectionId(null);
     setOneByOneResults(queuedState);
-    setOneByOneSummary({ total: connections.length, completed: 0, passed: 0, failed: 0, stopped: false });
+    setOneByOneSummary({
+      total: list.length,
+      completed: 0,
+      passed: 0,
+      failed: 0,
+      stopped: false,
+      mode: runMode,
+    });
 
     let passed = 0;
     let failed = 0;
 
     try {
-      for (let index = 0; index < connections.length; index += 1) {
+      for (let index = 0; index < list.length; index += 1) {
         if (stopOneByOneRef.current) {
           setOneByOneSummary({
-            total: connections.length,
+            total: list.length,
             completed: index,
             passed,
             failed,
             stopped: true,
+            mode: runMode,
           });
           break;
         }
 
-        const connection = connections[index];
+        const connection = list[index];
         setOneByOneCurrentConnectionId(connection.id);
         setOneByOneResults((prev) => ({
           ...prev,
           [connection.id]: { state: "testing", error: null },
         }));
 
+        const endpoint = runMode === "warmup" ? "warmup" : "test";
+        const failMessage = runMode === "warmup" ? "Warm-up failed" : "Test failed";
+
         try {
-          const res = await fetch(`/api/providers/${connection.id}/test`, { method: "POST" });
+          const res = await fetch(`/api/providers/${connection.id}/${endpoint}`, { method: "POST" });
           const data = await res.json();
           const valid = !!data.valid;
 
@@ -723,7 +755,7 @@ export default function ProviderDetailPage() {
                 ? {
                     ...c,
                     testStatus: valid ? "active" : "error",
-                    lastError: valid ? null : (data.error || "Test failed"),
+                    lastError: valid ? null : (data.error || failMessage),
                     lastErrorAt: valid ? null : new Date().toISOString(),
                   }
                 : c,
@@ -731,7 +763,7 @@ export default function ProviderDetailPage() {
           );
         } catch (error) {
           failed += 1;
-          const errMsg = error.message || "Test failed";
+          const errMsg = error.message || failMessage;
           setOneByOneResults((prev) => ({
             ...prev,
             [connection.id]: {
@@ -754,14 +786,15 @@ export default function ProviderDetailPage() {
         }
 
         setOneByOneSummary({
-          total: connections.length,
+          total: list.length,
           completed: index + 1,
           passed,
           failed,
           stopped: false,
+          mode: runMode,
         });
 
-        if (index < connections.length - 1) {
+        if (index < list.length - 1) {
           await sleep(ONE_BY_ONE_DELAY_MS);
         }
       }
@@ -1680,10 +1713,12 @@ export default function ProviderDetailPage() {
                     size="sm"
                     variant="secondary"
                     icon="sync"
-                    onClick={handleRunOneByOneTest}
+                    onClick={openRunModal}
                     disabled={oneByOneRunning}
                   >
-                    {oneByOneRunning ? "Testing Connection One-by-One..." : "Test Connection One-by-One"}
+                    {oneByOneRunning
+                      ? (oneByOneSummary?.mode === "warmup" ? "Warming Up…" : "Testing…")
+                      : "Test / Warm Up…"}
                   </Button>
                   {oneByOneRunning && (
                     <Button
@@ -1785,6 +1820,9 @@ export default function ProviderDetailPage() {
               {oneByOneSummary && (
                 <div className="mb-4 rounded-lg border border-black/10 bg-black/[0.02] px-3 py-2 text-xs text-text-muted dark:border-white/10 dark:bg-white/[0.03]">
                   <div className="flex flex-wrap items-center gap-3">
+                    <span className="font-medium text-text-main">
+                      {oneByOneSummary.mode === "warmup" ? "Warm Up" : "Test Connection"}
+                    </span>
                     <span>Total: {oneByOneSummary.total}</span>
                     <span>Completed: {oneByOneSummary.completed}</span>
                     <span>Passed: {oneByOneSummary.passed}</span>
@@ -2212,6 +2250,114 @@ export default function ProviderDetailPage() {
         message={confirmState?.message}
         variant="danger"
       />
+
+      {/* Run picker: choose mode (Test / Warm Up) + target (All / Active / Rate Limited / Error) */}
+      <Modal
+        isOpen={showRunModal}
+        onClose={() => setShowRunModal(false)}
+        title="Test / Warm Up Connections"
+        size="sm"
+      >
+        {(() => {
+          const targetDefs = [
+            { key: "all", label: "All", icon: "select_all", count: connections.length },
+            { key: "active", label: "Active", icon: "check_circle", count: connectionBuckets.active.length },
+            { key: "rateLimited", label: "Rate Limited", icon: "hourglass_top", count: connectionBuckets.rateLimited.length },
+            { key: "error", label: "Error", icon: "error", count: connectionBuckets.error.length },
+          ];
+          const targetCount = (runTarget === "all" ? connections : connectionBuckets[runTarget] || []).length;
+          return (
+            <div className="flex flex-col gap-4">
+              {/* Mode */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Mode</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRunMode("test")}
+                    className={`flex flex-col gap-1 rounded-[10px] border p-3 text-left transition-colors ${
+                      runMode === "test"
+                        ? "border-brand-500/60 bg-brand-500/10"
+                        : "border-border bg-surface-2 hover:bg-surface-3"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold text-text-main">
+                      <span className="material-symbols-outlined text-[18px] text-brand-500">network_check</span>
+                      Test Connection
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      Verify credentials &amp; reachability (light probe, no chat request).
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRunMode("warmup")}
+                    className={`flex flex-col gap-1 rounded-[10px] border p-3 text-left transition-colors ${
+                      runMode === "warmup"
+                        ? "border-amber-500/60 bg-amber-500/10"
+                        : "border-border bg-surface-2 hover:bg-surface-3"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold text-text-main">
+                      <span className="material-symbols-outlined text-[18px] text-amber-500">local_fire_department</span>
+                      Warm Up
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      Send a tiny real request to wake the session / quota window.
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Target */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Target</span>
+                <div className="grid grid-cols-2 gap-2">
+                  {targetDefs.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setRunTarget(t.key)}
+                      className={`flex items-center justify-between gap-2 rounded-[10px] border px-3 py-2 text-left transition-colors ${
+                        runTarget === t.key
+                          ? "border-primary/60 bg-primary/10"
+                          : "border-border bg-surface-2 hover:bg-surface-3"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 text-sm text-text-main">
+                        <span className="material-symbols-outlined text-[18px] text-text-muted">{t.icon}</span>
+                        {t.label}
+                      </span>
+                      <span className="text-xs font-semibold text-text-muted">{t.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <p className="text-xs text-text-muted">
+                {targetCount === 0
+                  ? "No connections match this target."
+                  : `${runMode === "warmup" ? "Warm up" : "Test"} ${targetCount} connection${targetCount === 1 ? "" : "s"}, one by one.`}
+              </p>
+            </div>
+          );
+        })()}
+        <div className="mt-5 flex items-center justify-end gap-3">
+          <Button variant="ghost" onClick={() => setShowRunModal(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="secondary"
+            icon={runMode === "warmup" ? "local_fire_department" : "play_arrow"}
+            onClick={() => handleRunOneByOne({ mode: runMode, target: runTarget })}
+            disabled={
+              (runTarget === "all" ? connections : connectionBuckets[runTarget] || []).length === 0
+            }
+          >
+            {runMode === "warmup" ? "Warm Up" : "Run Test"}
+          </Button>
+        </div>
+      </Modal>
 
       {/* Test All Models mode picker */}
       <Modal
