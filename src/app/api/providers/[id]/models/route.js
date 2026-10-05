@@ -634,6 +634,46 @@ export async function GET(request, { params }) {
 
     const config = PROVIDER_MODELS_CONFIG[connection.provider];
     if (!config) {
+      // Custom providers can use arbitrary IDs (for example `mirai`) while
+      // still exposing an OpenAI-compatible models endpoint.
+      const baseUrl = connection.providerSpecificData?.baseUrl?.trim();
+      if (baseUrl) {
+        const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
+        const modelsUrl = /\/v\d+(?:beta)?$/i.test(normalizedBaseUrl)
+          ? `${normalizedBaseUrl}/models`
+          : `${normalizedBaseUrl}/v1/models`;
+        const token = connection.apiKey || connection.accessToken || connection.providerSpecificData?.apiKey;
+        const response = await fetch(modelsUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.log(`Error fetching models from ${connection.provider}:`, errorText);
+          return NextResponse.json(
+            { error: `Failed to fetch models: ${response.status}` },
+            { status: response.status }
+          );
+        }
+        const data = await response.json();
+        const models = parseOpenAIStyleModels(data);
+        if (models.length === 0) {
+          return NextResponse.json({
+            provider: connection.provider,
+            connectionId: connection.id,
+            models: [],
+            warning: "Provider returned no models",
+          });
+        }
+        return NextResponse.json({
+          provider: connection.provider,
+          connectionId: connection.id,
+          models,
+        });
+      }
       return NextResponse.json(
         { error: `Provider ${connection.provider} does not support models listing` },
         { status: 400 }

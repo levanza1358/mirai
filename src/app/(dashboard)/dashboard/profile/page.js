@@ -6,9 +6,13 @@ import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
 import { useTheme } from "@/shared/hooks/useTheme";
 import { cn } from "@/shared/utils/cn";
-import { APP_CONFIG } from "@/shared/constants/config";
+import { APP_CONFIG, THEME_CONFIG } from "@/shared/constants/config";
 import { LOCALE_COOKIE, normalizeLocale } from "@/i18n/config";
 import { LOCALE_FLAGS } from "@/shared/constants/locales";
+import TokenSaverClient from "../token-saver/TokenSaverClient";
+import CLIToolsPageClient from "../cli-tools/CLIToolsPageClient";
+import ConsoleLogClient from "../console-log/ConsoleLogClient";
+import SkillsPage from "../skills/page";
 
 function getLocaleFromCookie() {
   if (typeof document === "undefined") return "en";
@@ -19,8 +23,17 @@ function getLocaleFromCookie() {
   return normalizeLocale(value);
 }
 
+const SETTINGS_TABS = [
+  { id: "general", label: "General", description: "Appearance, access, network, and data", icon: "tune" },
+  { id: "token-saver", label: "Token Saver", description: "Reduce request cost and context size", icon: "savings" },
+  { id: "cli-tools", label: "CLI Tools", description: "Connect coding tools to Mirai", icon: "terminal" },
+  { id: "console-log", label: "Console Log", description: "Live translator and gateway output", icon: "receipt_long" },
+  { id: "skills", label: "Skills", description: "Reusable instructions for AI tools", icon: "extension" },
+];
+
 export default function ProfilePage() {
-  const { theme, setTheme, isDark } = useTheme();
+  const { theme, accent, setTheme, setAccent } = useTheme();
+  const [activeTab, setActiveTab] = useState("general");
   const [locale, setLocale] = useState(() => getLocaleFromCookie());
   const [langOpen, setLangOpen] = useState(false);
   const [shutdownOpen, setShutdownOpen] = useState(false);
@@ -87,11 +100,9 @@ export default function ProfilePage() {
   const [proxyLoading, setProxyLoading] = useState(false);
   const [proxyTestLoading, setProxyTestLoading] = useState(false);
 
-  const [isRemoteHost, setIsRemoteHost] = useState(false);
-  useEffect(() => {
-    if (typeof window !== "undefined")
-      setIsRemoteHost(!["localhost", "127.0.0.1", "::1"].includes(window.location.hostname));
-  }, []);
+  const [isRemoteHost] = useState(() =>
+    typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
+  );
 
   useEffect(() => {
     fetch("/api/settings")
@@ -853,8 +864,45 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 sm:px-0">
+    <div className="max-w-6xl mx-auto px-4 sm:px-0">
       <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Workspace settings</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-text-main">Settings</h1>
+          <p className="max-w-2xl text-sm text-text-muted">Manage Mirai from one place. Switch sections without leaving this page.</p>
+        </div>
+
+        <div className="rounded-2xl border border-border-subtle bg-surface/80 p-2 shadow-[var(--shadow-soft)] overflow-x-auto">
+          <div className="flex min-w-max gap-1">
+            {SETTINGS_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                title={tab.description}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors",
+                  activeTab === tab.id
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-text-muted hover:bg-surface-2 hover:text-text-main"
+                )}
+              >
+                <span className="material-symbols-outlined text-[17px]">{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {activeTab !== "general" ? (
+          <div className="min-w-0 rounded-2xl border border-border-subtle bg-surface/40 p-3 sm:p-5">
+            {activeTab === "token-saver" && <TokenSaverClient />}
+            {activeTab === "cli-tools" && <CLIToolsPageClient machineId={null} />}
+            {activeTab === "console-log" && <ConsoleLogClient />}
+            {activeTab === "skills" && <SkillsPage />}
+          </div>
+        ) : (
+          <>
         {/* Local Mode Info */}
         <Card>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
@@ -867,28 +915,32 @@ export default function ProfilePage() {
                 <p className="text-sm text-text-muted">Running on your machine</p>
               </div>
             </div>
-            <div className="inline-flex p-1 rounded-lg bg-black/5 dark:bg-white/5 w-full sm:w-auto">
-              {["light", "dark", "system"].map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setTheme(option)}
-                  className={cn(
-                    "flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-md font-medium transition-all flex-1 sm:flex-initial",
-                    theme === option
-                      ? "bg-white dark:bg-white/10 text-text-main shadow-sm"
-                      : "text-text-muted hover:text-text-main"
-                  )}
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {option === "light" ? "light_mode" : option === "dark" ? "dark_mode" : "contrast"}
-                  </span>
-                  <span className="capitalize text-xs sm:text-sm">{option}</span>
-                </button>
-              ))}
+            <div className="inline-flex items-center gap-2 rounded-lg bg-black/5 dark:bg-white/5 px-3 py-2 text-xs font-medium text-text-muted">
+              <span className="material-symbols-outlined text-[18px] text-primary">dark_mode</span>
+              Dark mode
             </div>
           </div>
           <div className="flex flex-col gap-3 pt-4 border-t border-border">
+            <div className="flex flex-col gap-2 rounded-lg bg-bg border border-border p-3">
+              <p className="font-medium text-sm">Accent color</p>
+              <p className="text-xs text-text-muted">Choose highlight color used across Mirai.</p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {THEME_CONFIG.accents.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    title={option.label}
+                    onClick={() => setAccent(option.id)}
+                    className={cn(
+                      "size-8 rounded-full border-2 transition-transform hover:scale-110",
+                      accent === option.id ? "border-text-main ring-2 ring-primary/30" : "border-transparent"
+                    )}
+                    style={{ backgroundColor: option.color }}
+                    aria-label={`${option.label} accent`}
+                  />
+                ))}
+              </div>
+            </div>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg bg-bg border border-border gap-2">
               <div>
                 <p className="font-medium text-sm sm:text-base">Database Location</p>
@@ -1815,6 +1867,8 @@ export default function ProfilePage() {
           <p>{APP_CONFIG.name} v{APP_CONFIG.version}</p>
           <p className="mt-1">{isRemoteHost ? "Remote Mode" : "Local Mode - All data stored on your machine"}</p>
         </div>
+          </>
+        )}
       </div>
 
       <LanguageSwitcher

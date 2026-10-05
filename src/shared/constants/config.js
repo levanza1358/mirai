@@ -21,7 +21,14 @@ export const UPDATER_CONFIG = {
 // Theme configuration
 export const THEME_CONFIG = {
   storageKey: "theme",
-  defaultTheme: "system", // "light" | "dark" | "system"
+  defaultTheme: "dark",
+  accents: [
+    { id: "emerald", label: "Emerald", color: "#34d399" },
+    { id: "blue", label: "Blue", color: "#60a5fa" },
+    { id: "violet", label: "Violet", color: "#a78bfa" },
+    { id: "rose", label: "Rose", color: "#fb7185" },
+    { id: "amber", label: "Amber", color: "#fbbf24" },
+  ],
 };
 
 // Subscription

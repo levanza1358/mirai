@@ -1,4 +1,10 @@
-const FORWARDED = new Set(["retry-after", "x-should-retry"]);
+const FORWARDED = new Set([
+  "retry-after",
+  "x-should-retry",
+  // Atria exposes account-wide fixed-window RPM telemetry on every response.
+  "x-rpm-limit",
+  "x-rpm-remaining",
+]);
 const FORWARDED_PREFIX = "anthropic-ratelimit-";
 
 export function upstreamResponseHeaders(headers) {

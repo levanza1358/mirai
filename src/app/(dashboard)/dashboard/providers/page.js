@@ -8,6 +8,7 @@ import {
   Badge,
   Button,
   Toggle,
+  Modal,
 } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { getProviderIconSrc } from "@/shared/utils/providerIcon";
@@ -102,8 +103,8 @@ export default function ProvidersPage() {
   const [loading, setLoading] = useState(true);
   const [showAllApikey, setShowAllApikey] = useState(false);
   const [showAddCompatibleModal, setShowAddCompatibleModal] = useState(false);
-  const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] =
-    useState(false);
+  const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] = useState(false);
+  const [showCompatiblePicker, setShowCompatiblePicker] = useState(false);
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -435,25 +436,14 @@ export default function ProvidersPage() {
           <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
             Custom Providers (OpenAI/Anthropic Compatible){" "}
           </h2>
-          <div className="grid grid-cols-1 gap-2 sm:flex sm:w-auto">
-            <Button
-              size="sm"
-              icon="add"
-              onClick={() => setShowAddAnthropicCompatibleModal(true)}
-              className="w-full sm:w-auto"
-            >
-              Add Anthropic Compatible
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              icon="add"
-              onClick={() => setShowAddCompatibleModal(true)}
-              className="w-full !bg-white !text-black hover:!bg-gray-100 sm:w-auto"
-            >
-              Add OpenAI Compatible
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            icon="add"
+            onClick={() => setShowCompatiblePicker(true)}
+            className="w-full sm:w-auto"
+          >
+            Add compatible provider
+          </Button>
         </div>
         {compatibleProviders.length === 0 &&
         anthropicCompatibleProviders.length === 0 ? (
@@ -659,6 +649,33 @@ export default function ProvidersPage() {
           ))}
         </div>
       </div> */}
+
+      <Modal
+        isOpen={showCompatiblePicker}
+        title="Add compatible provider"
+        onClose={() => setShowCompatiblePicker(false)}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => { setShowCompatiblePicker(false); setShowAddAnthropicCompatibleModal(true); }}
+            className="rounded-2xl border border-border-subtle bg-surface-2 p-4 text-left transition hover:border-primary hover:bg-primary/5"
+          >
+            <span className="material-symbols-outlined text-primary">auto_awesome</span>
+            <p className="mt-3 font-semibold text-text-main">Anthropic</p>
+            <p className="mt-1 text-xs text-text-muted">Use Anthropic-compatible API format.</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setShowCompatiblePicker(false); setShowAddCompatibleModal(true); }}
+            className="rounded-2xl border border-border-subtle bg-surface-2 p-4 text-left transition hover:border-primary hover:bg-primary/5"
+          >
+            <span className="material-symbols-outlined text-primary">hub</span>
+            <p className="mt-3 font-semibold text-text-main">OpenAI</p>
+            <p className="mt-1 text-xs text-text-muted">Use OpenAI-compatible API format.</p>
+          </button>
+        </div>
+      </Modal>
 
       <AddCompatibleModal
         variant="openai"

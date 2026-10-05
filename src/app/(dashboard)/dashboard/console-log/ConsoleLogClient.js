@@ -69,16 +69,30 @@ export default function ConsoleLogClient() {
   }, [logs]);
 
   return (
-    <div className="">
-      <Card>
-        <div className="flex items-center justify-end px-4 pt-3 pb-2">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Live stream</p>
+          <h2 className="text-lg font-semibold text-text-main">Console output</h2>
+          <p className="text-sm text-text-muted">Watch translator events as they arrive.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={`inline-flex items-center gap-1.5 text-xs ${connected ? "text-emerald-500" : "text-text-muted"}`}>
+            <span className={`size-2 rounded-full ${connected ? "bg-emerald-500" : "bg-text-muted"}`} />
+            {connected ? "Connected" : "Disconnected"}
+          </span>
           <Button size="sm" variant="outline" icon="delete" onClick={handleClear}>
             Clear
           </Button>
         </div>
+      </div>
+      <Card>
+        <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-muted">
+          {logs.length} {logs.length === 1 ? "line" : "lines"} · max {CONSOLE_LOG_CONFIG.maxLines}
+        </div>
         <div
           ref={logRef}
-          className="bg-black rounded-b-lg p-4 text-xs font-mono h-[calc(100vh-220px)] overflow-y-auto"
+          className="bg-[#0b1020] rounded-b-lg p-4 text-xs font-mono h-[min(620px,calc(100vh-300px))] overflow-y-auto"
         >
           {logs.length === 0 ? (
             <span className="text-text-muted">No console logs yet.</span>

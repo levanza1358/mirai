@@ -74,9 +74,14 @@ function SkillRow({ skill }) {
 
 export default function SkillsPage() {
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-5">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">AI toolkit</p>
+        <h2 className="text-lg font-semibold text-text-main">Skills library</h2>
+        <p className="text-sm text-text-muted">Copy reusable Mirai instructions into your coding assistant.</p>
+      </div>
       <Card padding="md">
-        <div className="text-xs text-text-muted mb-2">Paste this to your AI:</div>
+        <div className="text-xs font-semibold text-text-main mb-2">Quick start</div>
         <div className="px-3 py-2 rounded bg-surface-2 font-mono text-[12px] text-text-main">
           Read this skill and use it: {getSkillRawUrl("mirai")}
         </div>

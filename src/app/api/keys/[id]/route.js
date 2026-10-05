@@ -21,7 +21,7 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { isActive } = body;
+    const { isActive, expiresAt, maxRequests, maxTokens, maxCost } = body;
 
     const existing = await getApiKeyById(id);
     if (!existing) {
@@ -30,6 +30,10 @@ export async function PUT(request, { params }) {
 
     const updateData = {};
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (expiresAt !== undefined) updateData.expiresAt = expiresAt || null;
+    if (maxRequests !== undefined) updateData.maxRequests = Number.isInteger(maxRequests) && maxRequests > 0 ? maxRequests : null;
+    if (maxTokens !== undefined) updateData.maxTokens = Number.isInteger(maxTokens) && maxTokens > 0 ? maxTokens : null;
+    if (maxCost !== undefined) updateData.maxCost = typeof maxCost === "number" && maxCost >= 0 ? maxCost : null;
 
     const updated = await updateApiKey(id, updateData);
 

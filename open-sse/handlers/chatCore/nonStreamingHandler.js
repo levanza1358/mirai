@@ -4,6 +4,7 @@ import { fromOpenAIFinish } from "../../translator/concerns/finishReason.js";
 import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.js";
 import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
 import { createErrorResult } from "../../utils/error.js";
+import { isReasoningOnlyTruncation, reasoningTruncationMessage } from "../../utils/reasoningTruncation.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
@@ -373,6 +374,21 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
       if (choice?.message?.reasoning_content && choice.message.content) {
         delete choice.message.reasoning_content;
       }
+    }
+  }
+
+  // Reasoning-only truncation: the model burned the whole max_tokens budget on
+  // thinking and never produced its answer (content empty, finish_reason
+  // "length"). Returning that 200 hands the client an empty answer (or, if the
+  // reasoning is preserved, a raw chain-of-thought that reads as a nonsense
+  // reply). Surface an actionable 400 instead — a client-side budget problem,
+  // so it must not cool the credential down (400 is not a fallback status).
+  if (!isClaudeMessageResponse && !isResponsesResponse) {
+    const truncated = (translatedResponse?.choices || []).some(isReasoningOnlyTruncation);
+    if (truncated) {
+      appendLog({ status: `FAILED ${HTTP_STATUS.BAD_REQUEST}` });
+      reqLogger.logError(new Error("reasoning_only_truncation"), translatedResponse);
+      return createErrorResult(HTTP_STATUS.BAD_REQUEST, reasoningTruncationMessage(model));
     }
   }
 

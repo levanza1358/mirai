@@ -289,6 +289,18 @@ export const PROVIDER_CAPABILITIES = {
   "ollama": {
     "deepseek-v4.1-flash:cloud": { vision: true, reasoning: true, thinkingFormat: "deepseek", contextWindow: 1000000, maxOutput: 384000 },
   },
+  // Atria Dawn (AtomInnoLab) — single OpenAI-compatible research-preview model.
+  // It reasons by default: reasoning tokens are emitted as a separate counter
+  // (usage.completion_tokens_details.reasoning_tokens) and, when the client's
+  // max_tokens budget is too small, the WHOLE budget is spent on reasoning and
+  // the message comes back with content:null (finish_reason:"length"). Marking
+  // it reasoning-aware lets clients size max_tokens for thinking + answer.
+  // Text-only: the service ships a hook that blocks image/PDF input.
+  // thinkingFormat stays "openai" (reasoning_effort); thinkingCanDisable is
+  // false because the preview has no documented switch to turn thinking off.
+  "atria": {
+    "Atria-Dawn-Preview": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 262144, maxOutput: 65536 },
+  },
 };
 
 // Qoder CN serves the identical model catalog from the CN gateway, so it shares

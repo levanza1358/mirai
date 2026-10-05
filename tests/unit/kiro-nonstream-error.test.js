@@ -28,6 +28,29 @@ describe("Kiro non-streaming error propagation", () => {
     });
   });
 
+  it("rejects content when upstream closes without a terminal event", () => {
+    const raw = 'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}';
+
+    expect(parseSSEToOpenAIResponse(raw, "codebuddy")).toEqual({
+      error: {
+        message: "Upstream SSE stream ended before a terminal event",
+        code: "incomplete_stream"
+      }
+    });
+  });
+
+  it("accepts a complete stream with an explicit terminal event", () => {
+    const raw = [
+      'data: {"choices":[{"delta":{"content":"done"},"finish_reason":null}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      "data: [DONE]"
+    ].join("\n\n");
+
+    expect(parseSSEToOpenAIResponse(raw, "codebuddy")).toMatchObject({
+      choices: [{ message: { content: "done" }, finish_reason: "stop" }]
+    });
+  });
+
   it("returns 502 instead of collapsing a failed Kiro SSE stream into stop", async () => {
     const encoder = new TextEncoder();
     const raw = [

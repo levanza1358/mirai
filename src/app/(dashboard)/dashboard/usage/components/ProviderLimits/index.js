@@ -201,6 +201,7 @@ export default function ProviderLimits() {
   const [quotaVisibility, setQuotaVisibility] = useState({});
   const [expiringFirst, setExpiringFirst] = useState(false);
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
+  const [layout, setLayout] = useState("list");
   const [bulkToggling, setBulkToggling] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(CONNECTIONS_PAGE_SIZE);
@@ -1094,7 +1095,29 @@ export default function ProviderLimits() {
         </div>
       </div>
 
-      {/* Provider cards: 2 columns, compact */}
+      {/* Provider quota layout */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-text-primary">Provider limits</h2>
+          <p className="text-xs text-text-muted">Quota status by connection</p>
+        </div>
+        <div className="flex items-center rounded-lg border border-border bg-bg-subtle p-1" role="group" aria-label="Quota layout">
+          {[{ value: "list", icon: "view_list", label: "List" }, { value: "grid", icon: "grid_view", label: "Grid" }].map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setLayout(option.value)}
+              aria-pressed={layout === option.value}
+              title={`${option.label} view`}
+              className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition-colors ${layout === option.value ? "bg-surface text-primary shadow-sm" : "text-text-muted hover:text-text"}`}
+            >
+              <span className="material-symbols-outlined text-[16px]">{option.icon}</span>
+              <span className="hidden sm:inline">{option.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {expiringFirst && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
           Expiring-first currently reorders accounts inside the current page.
@@ -1102,7 +1125,7 @@ export default function ProviderLimits() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className={layout === "list" ? "flex flex-col gap-3" : "grid grid-cols-1 gap-3 md:grid-cols-2"}>
         {sortedConnections.map((conn) => {
           const quota = quotaData[conn.id];
           const isLoading = loading[conn.id];
@@ -1124,7 +1147,7 @@ export default function ProviderLimits() {
             <Card
               key={conn.id}
               padding="none"
-              className={`min-w-0 ${isInactive ? "opacity-60" : ""}`}
+              className={`min-w-0 ${isInactive ? "opacity-60" : ""} ${layout === "list" ? "shadow-sm" : ""}`}
             >
               <div className="px-3 py-2 border-b border-black/10 dark:border-white/10">
                 <div className="flex items-center justify-between gap-2">

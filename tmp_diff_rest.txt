@@ -1,0 +1,334 @@
+﻿diff --git a/src/app/(dashboard)/dashboard/cli-tools/CLIToolsPageClient.js b/src/app/(dashboard)/dashboard/cli-tools/CLIToolsPageClient.js
+index e8a5245..733a4d8 100644
+--- a/src/app/(dashboard)/dashboard/cli-tools/CLIToolsPageClient.js
++++ b/src/app/(dashboard)/dashboard/cli-tools/CLIToolsPageClient.js
+@@ -45,6 +45,16 @@ export default function CLIToolsPageClient({ machineId }) {
+ 
+   return (
+     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-1 sm:px-0">
++      <div className="flex items-center justify-between gap-3">
++        <div>
++          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Developer access</p>
++          <h2 className="text-lg font-semibold text-text-main">CLI tools</h2>
++          <p className="text-sm text-text-muted">Configure coding assistants and local integrations.</p>
++        </div>
++        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-500">
++          <span className="size-2 rounded-full bg-emerald-500" /> Ready
++        </span>
++      </div>
+       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+         {regularTools.map(([toolId, tool]) => (
+           <ToolSummaryCard key={toolId} toolId={toolId} tool={tool} status={toolStatuses[toolId]} />
+diff --git a/src/app/(dashboard)/dashboard/console-log/ConsoleLogClient.js b/src/app/(dashboard)/dashboard/console-log/ConsoleLogClient.js
+index 01a8a75..240af65 100644
+--- a/src/app/(dashboard)/dashboard/console-log/ConsoleLogClient.js
++++ b/src/app/(dashboard)/dashboard/console-log/ConsoleLogClient.js
+@@ -69,16 +69,30 @@ export default function ConsoleLogClient() {
+   }, [logs]);
+ 
+   return (
+-    <div className="">
+-      <Card>
+-        <div className="flex items-center justify-end px-4 pt-3 pb-2">
++    <div className="space-y-4">
++      <div className="flex items-center justify-between gap-3">
++        <div>
++          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Live stream</p>
++          <h2 className="text-lg font-semibold text-text-main">Console output</h2>
++          <p className="text-sm text-text-muted">Watch translator events as they arrive.</p>
++        </div>
++        <div className="flex items-center gap-3">
++          <span className={`inline-flex items-center gap-1.5 text-xs ${connected ? "text-emerald-500" : "text-text-muted"}`}>
++            <span className={`size-2 rounded-full ${connected ? "bg-emerald-500" : "bg-text-muted"}`} />
++            {connected ? "Connected" : "Disconnected"}
++          </span>
+           <Button size="sm" variant="outline" icon="delete" onClick={handleClear}>
+             Clear
+           </Button>
+         </div>
++      </div>
++      <Card>
++        <div className="px-4 py-3 border-b border-border-subtle text-xs text-text-muted">
++          {logs.length} {logs.length === 1 ? "line" : "lines"} · max {CONSOLE_LOG_CONFIG.maxLines}
++        </div>
+         <div
+           ref={logRef}
+-          className="bg-black rounded-b-lg p-4 text-xs font-mono h-[calc(100vh-220px)] overflow-y-auto"
++          className="bg-[#0b1020] rounded-b-lg p-4 text-xs font-mono h-[min(620px,calc(100vh-300px))] overflow-y-auto"
+         >
+           {logs.length === 0 ? (
+             <span className="text-text-muted">No console logs yet.</span>
+diff --git a/src/app/(dashboard)/dashboard/providers/page.js b/src/app/(dashboard)/dashboard/providers/page.js
+index e75c878..f25049e 100644
+--- a/src/app/(dashboard)/dashboard/providers/page.js
++++ b/src/app/(dashboard)/dashboard/providers/page.js
+@@ -8,6 +8,7 @@ import {
+   Badge,
+   Button,
+   Toggle,
++  Modal,
+ } from "@/shared/components";
+ import ProviderIcon from "@/shared/components/ProviderIcon";
+ import { getProviderIconSrc } from "@/shared/utils/providerIcon";
+@@ -102,8 +103,8 @@ export default function ProvidersPage() {
+   const [loading, setLoading] = useState(true);
+   const [showAllApikey, setShowAllApikey] = useState(false);
+   const [showAddCompatibleModal, setShowAddCompatibleModal] = useState(false);
+-  const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] =
+-    useState(false);
++  const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] = useState(false);
++  const [showCompatiblePicker, setShowCompatiblePicker] = useState(false);
+   const [testingMode, setTestingMode] = useState(null);
+   const [testResults, setTestResults] = useState(null);
+   const [statusFilter, setStatusFilter] = useState("all");
+@@ -435,25 +436,14 @@ export default function ProvidersPage() {
+           <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+             Custom Providers (OpenAI/Anthropic Compatible){" "}
+           </h2>
+-          <div className="grid grid-cols-1 gap-2 sm:flex sm:w-auto">
+-            <Button
+-              size="sm"
+-              icon="add"
+-              onClick={() => setShowAddAnthropicCompatibleModal(true)}
+-              className="w-full sm:w-auto"
+-            >
+-              Add Anthropic Compatible
+-            </Button>
+-            <Button
+-              size="sm"
+-              variant="secondary"
+-              icon="add"
+-              onClick={() => setShowAddCompatibleModal(true)}
+-              className="w-full !bg-white !text-black hover:!bg-gray-100 sm:w-auto"
+-            >
+-              Add OpenAI Compatible
+-            </Button>
+-          </div>
++          <Button
++            size="sm"
++            icon="add"
++            onClick={() => setShowCompatiblePicker(true)}
++            className="w-full sm:w-auto"
++          >
++            Add compatible provider
++          </Button>
+         </div>
+         {compatibleProviders.length === 0 &&
+         anthropicCompatibleProviders.length === 0 ? (
+@@ -660,6 +650,33 @@ export default function ProvidersPage() {
+         </div>
+       </div> */}
+ 
++      <Modal
++        isOpen={showCompatiblePicker}
++        title="Add compatible provider"
++        onClose={() => setShowCompatiblePicker(false)}
++      >
++        <div className="grid gap-3 sm:grid-cols-2">
++          <button
++            type="button"
++            onClick={() => { setShowCompatiblePicker(false); setShowAddAnthropicCompatibleModal(true); }}
++            className="rounded-2xl border border-border-subtle bg-surface-2 p-4 text-left transition hover:border-primary hover:bg-primary/5"
++          >
++            <span className="material-symbols-outlined text-primary">auto_awesome</span>
++            <p className="mt-3 font-semibold text-text-main">Anthropic</p>
++            <p className="mt-1 text-xs text-text-muted">Use Anthropic-compatible API format.</p>
++          </button>
++          <button
++            type="button"
++            onClick={() => { setShowCompatiblePicker(false); setShowAddCompatibleModal(true); }}
++            className="rounded-2xl border border-border-subtle bg-surface-2 p-4 text-left transition hover:border-primary hover:bg-primary/5"
++          >
++            <span className="material-symbols-outlined text-primary">hub</span>
++            <p className="mt-3 font-semibold text-text-main">OpenAI</p>
++            <p className="mt-1 text-xs text-text-muted">Use OpenAI-compatible API format.</p>
++          </button>
++        </div>
++      </Modal>
++
+       <AddCompatibleModal
+         variant="openai"
+         isOpen={showAddCompatibleModal}
+diff --git a/src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js b/src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js
+index 45785c6..013e4bb 100644
+--- a/src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js
++++ b/src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js
+@@ -201,6 +201,7 @@ export default function ProviderLimits() {
+   const [quotaVisibility, setQuotaVisibility] = useState({});
+   const [expiringFirst, setExpiringFirst] = useState(false);
+   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
++  const [layout, setLayout] = useState("list");
+   const [bulkToggling, setBulkToggling] = useState(false);
+   const [page, setPage] = useState(1);
+   const [pageSize, setPageSize] = useState(CONNECTIONS_PAGE_SIZE);
+@@ -1094,7 +1095,29 @@ export default function ProviderLimits() {
+         </div>
+       </div>
+ 
+-      {/* Provider cards: 2 columns, compact */}
++      {/* Provider quota layout */}
++      <div className="flex items-center justify-between gap-3">
++        <div>
++          <h2 className="text-base font-semibold text-text-primary">Provider limits</h2>
++          <p className="text-xs text-text-muted">Quota status by connection</p>
++        </div>
++        <div className="flex items-center rounded-lg border border-border bg-bg-subtle p-1" role="group" aria-label="Quota layout">
++          {[{ value: "list", icon: "view_list", label: "List" }, { value: "grid", icon: "grid_view", label: "Grid" }].map((option) => (
++            <button
++              key={option.value}
++              type="button"
++              onClick={() => setLayout(option.value)}
++              aria-pressed={layout === option.value}
++              title={`${option.label} view`}
++              className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition-colors ${layout === option.value ? "bg-surface text-primary shadow-sm" : "text-text-muted hover:text-text"}`}
++            >
++              <span className="material-symbols-outlined text-[16px]">{option.icon}</span>
++              <span className="hidden sm:inline">{option.label}</span>
++            </button>
++          ))}
++        </div>
++      </div>
++
+       {expiringFirst && (
+         <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+           Expiring-first currently reorders accounts inside the current page.
+@@ -1102,7 +1125,7 @@ export default function ProviderLimits() {
+         </div>
+       )}
+ 
+-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
++      <div className={layout === "list" ? "flex flex-col gap-3" : "grid grid-cols-1 gap-3 md:grid-cols-2"}>
+         {sortedConnections.map((conn) => {
+           const quota = quotaData[conn.id];
+           const isLoading = loading[conn.id];
+@@ -1124,7 +1147,7 @@ export default function ProviderLimits() {
+             <Card
+               key={conn.id}
+               padding="none"
+-              className={`min-w-0 ${isInactive ? "opacity-60" : ""}`}
++              className={`min-w-0 ${isInactive ? "opacity-60" : ""} ${layout === "list" ? "shadow-sm" : ""}`}
+             >
+               <div className="px-3 py-2 border-b border-black/10 dark:border-white/10">
+                 <div className="flex items-center justify-between gap-2">
+diff --git a/src/app/(dashboard)/dashboard/usage/page.js b/src/app/(dashboard)/dashboard/usage/page.js
+index 3f47b64..916806b 100644
+--- a/src/app/(dashboard)/dashboard/usage/page.js
++++ b/src/app/(dashboard)/dashboard/usage/page.js
+@@ -41,29 +41,44 @@ function UsageContent() {
+     router.push(`/dashboard/usage?${params.toString()}`, { scroll: false });
+   };
+ 
++  const tabs = [
++    { value: "overview", label: "Overview", icon: "insights" },
++    { value: "logs", label: "Request logs", icon: "list_alt" },
++    { value: "details", label: "Details", icon: "manage_search" },
++  ];
++
+   return (
+-    <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
+-      {/* Tabs + period selector on same row */}
+-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+-        <SegmentedControl
+-          options={[
+-            { value: "overview", label: "Overview" },
+-            { value: "details", label: "Details" },
+-          ]}
+-          value={activeTab}
+-          onChange={handleTabChange}
+-          className="w-full sm:w-auto"
+-        />
+-        {activeTab === "overview" && (
+-          <SegmentedControl
+-            options={PERIODS}
+-            value={period}
+-            onChange={setPeriod}
+-            size="sm"
+-            className="w-full sm:w-auto"
+-          />
+-        )}
+-      </div>
++    <div className="flex min-w-0 flex-col gap-5 px-1 sm:px-0">
++      <header className="relative overflow-hidden rounded-2xl border border-border bg-surface px-5 py-5 shadow-sm sm:px-7 sm:py-6">
++        <div className="pointer-events-none absolute -right-16 -top-20 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
++        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
++          <div>
++            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary">
++              <span className="material-symbols-outlined text-[17px]">monitoring</span>
++              Analytics
++            </div>
++            <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">Usage overview</h1>
++            <p className="mt-1 max-w-xl text-sm text-text-muted">Track requests, token flow, provider health, and estimated spend in one place.</p>
++          </div>
++          {activeTab === "overview" && (
++            <SegmentedControl options={PERIODS} value={period} onChange={setPeriod} size="sm" className="w-full lg:w-auto" />
++          )}
++        </div>
++      </header>
++
++      <nav className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-bg-subtle p-1" aria-label="Usage sections">
++        {tabs.map((tab) => (
++          <button
++            key={tab.value}
++            type="button"
++            onClick={() => handleTabChange(tab.value)}
++            className={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${activeTab === tab.value ? "bg-surface text-text shadow-sm" : "text-text-muted hover:bg-surface/60 hover:text-text"}`}
++          >
++            <span className="material-symbols-outlined text-[18px]">{tab.icon}</span>
++            {tab.label}
++          </button>
++        ))}
++      </nav>
+ 
+       {activeTab === "overview" && (
+         <Suspense fallback={<CardSkeleton />}>
+diff --git a/src/app/api/providers/[id]/models/route.js b/src/app/api/providers/[id]/models/route.js
+index 292f2f9..1131e6e 100644
+--- a/src/app/api/providers/[id]/models/route.js
++++ b/src/app/api/providers/[id]/models/route.js
+@@ -634,6 +634,46 @@ export async function GET(request, { params }) {
+ 
+     const config = PROVIDER_MODELS_CONFIG[connection.provider];
+     if (!config) {
++      // Custom providers can use arbitrary IDs (for example `mirai`) while
++      // still exposing an OpenAI-compatible models endpoint.
++      const baseUrl = connection.providerSpecificData?.baseUrl?.trim();
++      if (baseUrl) {
++        const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
++        const modelsUrl = /\/v\d+(?:beta)?$/i.test(normalizedBaseUrl)
++          ? `${normalizedBaseUrl}/models`
++          : `${normalizedBaseUrl}/v1/models`;
++        const token = connection.apiKey || connection.accessToken || connection.providerSpecificData?.apiKey;
++        const response = await fetch(modelsUrl, {
++          method: "GET",
++          headers: {
++            "Content-Type": "application/json",
++            ...(token ? { Authorization: `Bearer ${token}` } : {}),
++          },
++        });
++        if (!response.ok) {
++          const errorText = await response.text();
++          console.log(`Error fetching models from ${connection.provider}:`, errorText);
++          return NextResponse.json(
++            { error: `Failed to fetch models: ${response.status}` },
++            { status: response.status }
++          );
++        }
++        const data = await response.json();
++        const models = parseOpenAIStyleModels(data);
++        if (models.length === 0) {
++          return NextResponse.json({
++            provider: connection.provider,
++            connectionId: connection.id,
++            models: [],
++            warning: "Provider returned no models",
++          });
++        }
++        return NextResponse.json({
++          provider: connection.provider,
++          connectionId: connection.id,
++          models,
++        });
++      }
+       return NextResponse.json(
+         { error: `Provider ${connection.provider} does not support models listing` },
+         { status: 400 }

@@ -60,854 +60,109 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
-  const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
-  const [presetLoading, setPresetLoading] = useState(null); // "cursor" | "claude" | null
+  const [presetLoading, setPresetLoading] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [search, setSearch] = useState("");
+  const [strategyFilter, setStrategyFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
+  const [selectMode, setSelectMode] = useState(false);
+  const { getCaps } = useModelCaps();
   const { copied, copy } = useCopyToClipboard();
 
-  useEffect(() => {
-    fetchData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Drop stale selection when the combo list changes (delete / refresh).
-  useEffect(() => {
-    const alive = new Set(combos.map((c) => c.id));
-    setSelectedIds((prev) => prev.filter((id) => alive.has(id)));
-  }, [combos]);
-
+  useEffect(() => { fetchData(); }, []);
   const selectedCombos = combos.filter((c) => selectedIds.includes(c.id));
   const allSelected = combos.length > 0 && selectedIds.length === combos.length;
-  const someSelected = selectedIds.length > 0;
+  const visibleCombos = combos.filter((combo) => {
+    const strategy = comboStrategies[combo.name]?.fallbackStrategy || "fallback";
+    return combo.name.toLowerCase().includes(search.toLowerCase()) && (strategyFilter === "all" || strategy === strategyFilter);
+  }).sort((a, b) => sortBy === "models" ? b.models.length - a.models.length : sortBy === "strategy" ? (comboStrategies[b.name]?.fallbackStrategy || "fallback").localeCompare(comboStrategies[a.name]?.fallbackStrategy || "fallback") : a.name.localeCompare(b.name));
 
-  const toggleSelect = (id) => {
-    setSelectedIds((prev) => (
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    ));
-  };
-
-  const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? [] : combos.map((c) => c.id));
-  };
-
+  const toggleSelect = (id) => setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const toggleSelectAll = () => setSelectedIds(allSelected ? [] : visibleCombos.map((c) => c.id));
   const clearSelection = () => setSelectedIds([]);
 
-  const handleGeneratePresets = async (source) => {
-    const label = source === "cursor" ? "Cursor Default" : "Claude Default";
-    setPresetLoading(source);
+  async function fetchData() {
     try {
-      const previewRes = await fetch(`/api/combos/presets?source=${source}`);
-      const preview = await previewRes.json();
-      if (!previewRes.ok) {
-        alert(preview.error || `Failed to preview ${label}`);
-        return;
-      }
-
-      const toCreate = preview.toCreate ?? (preview.items || []).filter((i) => !i.exists).length;
-      const toSkip = preview.toSkip ?? (preview.items || []).filter((i) => i.exists).length;
-      const total = (preview.items || []).length;
-
-      if (total === 0) {
-        alert(`No ${label} models available to generate.`);
-        return;
-      }
-
-      if (toCreate === 0) {
-        alert(`All ${total} ${label} combos already exist. Nothing to create.`);
-        return;
-      }
-
-      setConfirmState({
-        title: `Generate ${label}`,
-        message: `Create ${toCreate} combo${toCreate === 1 ? "" : "s"} named like ${source === "cursor" ? "Cursor" : "Claude"} model IDs (seeded with cu/… or cc/…). ${toSkip} already exist and will be skipped. You can edit any combo afterward to add fallbacks.`,
-        confirmText: "Generate",
-        variant: "primary",
-        onConfirm: async () => {
-          setConfirmState((prev) => prev ? { ...prev, loading: true } : null);
-          try {
-            const res = await fetch("/api/combos/presets", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ source }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-              alert(data.error || `Failed to generate ${label}`);
-              return;
-            }
-            await fetchData();
-            setConfirmState(null);
-          } catch (error) {
-            console.log(`Error generating ${label}:`, error);
-            alert(`Failed to generate ${label}`);
-            setConfirmState((prev) => prev ? { ...prev, loading: false } : null);
-          }
-        },
-      });
-    } catch (error) {
-      console.log(`Error previewing ${label}:`, error);
-      alert(`Failed to preview ${label}`);
-    } finally {
-      setPresetLoading(null);
-    }
-  };
-
-  const fetchData = async () => {
-    try {
-      const [combosRes, providersRes, settingsRes] = await Promise.all([
-        fetch("/api/combos"),
-        fetch("/api/providers"),
-        fetch("/api/settings"),
-      ]);
+      const [combosRes, providersRes, settingsRes] = await Promise.all([fetch("/api/combos"), fetch("/api/providers"), fetch("/api/settings")]);
       const combosData = await combosRes.json();
       const providersData = await providersRes.json();
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
-
-      // Only LLM combos here - webSearch/webFetch combos belong to media-providers/web
-      if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
-      if (providersRes.ok) {
-        setActiveProviders(providersData.connections || []);
-      }
+      if (combosRes.ok) setCombos((combosData.combos || []).filter((c) => !c.kind || c.kind === "llm"));
+      if (providersRes.ok) setActiveProviders(providersData.connections || []);
       setComboStrategies(settingsData.comboStrategies || {});
-      const rawAdapter = settingsData.capacityAdapter || {};
-      const normalized = {};
-      for (const cap of CAPACITY_ADAPTER_CAPS) {
-        normalized[cap.key] = normalizeCapEntry(rawAdapter[cap.key]);
-      }
-      setCapacityAdapter(normalized);
-    } catch (error) {
-      console.log("Error fetching data:", error);
-    } finally {
-      setLoading(false);
-    }
+      const raw = settingsData.capacityAdapter || {};
+      setCapacityAdapter(Object.fromEntries(CAPACITY_ADAPTER_CAPS.map((cap) => [cap.key, normalizeCapEntry(raw[cap.key])] )));
+    } catch (error) { console.log("Error fetching combos:", error); } finally { setLoading(false); }
   };
 
-  const handleSetCapacityAdapter = async (next) => {
-    setCapacityAdapter(next);
-    try {
-      await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ capacityAdapter: next }),
-      });
-    } catch (error) {
-      console.log("Error updating capacity adapter:", error);
-    }
+  const persistSettings = async (patch) => {
+    await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
   };
-
+  const handleSetCapacityAdapter = async (next) => { setCapacityAdapter(next); try { await persistSettings({ capacityAdapter: next }); } catch (error) { console.log("Error updating adapter:", error); } };
   const handleCreate = async (data) => {
-    try {
-      const res = await fetch("/api/combos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        await fetchData();
-        setShowCreateModal(false);
-      } else {
-        const err = await res.json();
-        alert(err.error || "Failed to create combo");
-      }
-    } catch (error) {
-      console.log("Error creating combo:", error);
-    }
+    const res = await fetch("/api/combos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    if (res.ok) { await fetchData(); setShowCreateModal(false); } else { const err = await res.json(); alert(err.error || "Failed to create combo"); }
   };
-
   const handleUpdate = async (id, data) => {
-    try {
-      const res = await fetch(`/api/combos/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        await fetchData();
-        setEditingCombo(null);
-      } else {
-        const err = await res.json();
-        alert(err.error || "Failed to update combo");
-      }
-    } catch (error) {
-      console.log("Error updating combo:", error);
-    }
+    const res = await fetch(`/api/combos/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    if (res.ok) { await fetchData(); setEditingCombo(null); } else { const err = await res.json(); alert(err.error || "Failed to update combo"); }
   };
-
-  const pruneStrategiesForNames = (names, base = comboStrategies) => {
-    const updated = { ...base };
-    for (const name of names) delete updated[name];
-    return updated;
-  };
-
-  const persistComboStrategies = async (updated) => {
-    await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ comboStrategies: updated }),
-    });
-    setComboStrategies(updated);
-  };
-
-  const handleDelete = async (id) => {
+  const persistStrategies = async (next) => { await persistSettings({ comboStrategies: next }); setComboStrategies(next); };
+  const handleSetStrategy = async (name, value) => { const next = { ...comboStrategies }; if (value === "fallback") delete next[name]; else next[name] = { ...(next[name] || {}), fallbackStrategy: value }; await persistStrategies(next); };
+  const handleDelete = (id) => {
     const combo = combos.find((c) => c.id === id);
-    setConfirmState({
-      title: "Delete Combo",
-      message: combo ? `Delete combo "${combo.name}"?` : "Delete this combo?",
-      onConfirm: async () => {
-        setConfirmState((prev) => prev ? { ...prev, loading: true } : null);
-        try {
-          const res = await fetch(`/api/combos/${id}`, { method: "DELETE" });
-          if (res.ok) {
-            if (combo?.name) {
-              await persistComboStrategies(pruneStrategiesForNames([combo.name]));
-            }
-            setCombos((prev) => prev.filter((c) => c.id !== id));
-            setSelectedIds((prev) => prev.filter((x) => x !== id));
-          }
-          setConfirmState(null);
-        } catch (error) {
-          console.log("Error deleting combo:", error);
-          setConfirmState((prev) => prev ? { ...prev, loading: false } : null);
-        }
-      }
-    });
+    setConfirmState({ title: "Delete combo", message: `Delete ${combo?.name || "this combo"}?`, variant: "danger", confirmText: "Delete", onConfirm: async () => { setConfirmState((s) => ({ ...s, loading: true })); const res = await fetch(`/api/combos/${id}`, { method: "DELETE" }); if (res.ok) { setCombos((prev) => prev.filter((c) => c.id !== id)); setSelectedIds((prev) => prev.filter((x) => x !== id)); } setConfirmState(null); } });
   };
+  const handleBulkDelete = () => { if (!selectedCombos.length) return; setConfirmState({ title: "Delete selected combos", message: `Delete ${selectedCombos.length} combos?`, variant: "danger", confirmText: "Delete", onConfirm: async () => { setBulkBusy(true); await Promise.all(selectedCombos.map((c) => fetch(`/api/combos/${c.id}`, { method: "DELETE" }))); setCombos((prev) => prev.filter((c) => !selectedIds.includes(c.id))); clearSelection(); setBulkBusy(false); setConfirmState(null); } }); };
+  const handleBulkStrategy = async (value) => { if (!value) return; const next = { ...comboStrategies }; selectedCombos.forEach((c) => value === "fallback" ? delete next[c.name] : next[c.name] = { ...(next[c.name] || {}), fallbackStrategy: value }); setBulkBusy(true); await persistStrategies(next); setBulkBusy(false); };
+  const handleGeneratePresets = async (source) => { setPresetLoading(source); try { const res = await fetch(`/api/combos/presets?source=${source}`); const data = await res.json(); if (!res.ok) return alert(data.error || "Preset unavailable"); const count = data.toCreate ?? (data.items || []).filter((i) => !i.exists).length; if (!count) return alert("All presets already exist"); setConfirmState({ title: `Generate ${source} presets`, message: `Create ${count} preset combos?`, confirmText: "Generate", variant: "primary", onConfirm: async () => { await fetch("/api/combos/presets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source }) }); await fetchData(); setConfirmState(null); } }); } finally { setPresetLoading(null); } };
 
-  const handleBulkDelete = () => {
-    if (selectedCombos.length === 0) return;
-    const count = selectedCombos.length;
-    setConfirmState({
-      title: "Delete Selected Combos",
-      message: `Delete ${count} selected combo${count === 1 ? "" : "s"}? This cannot be undone.`,
-      confirmText: "Delete",
-      variant: "danger",
-      onConfirm: async () => {
-        setConfirmState((prev) => prev ? { ...prev, loading: true } : null);
-        setBulkBusy(true);
-        try {
-          const ids = selectedCombos.map((c) => c.id);
-          const names = selectedCombos.map((c) => c.name);
-          const results = await Promise.all(
-            ids.map((id) => fetch(`/api/combos/${id}`, { method: "DELETE" }))
-          );
-          const failed = results.filter((r) => !r.ok).length;
-          await persistComboStrategies(pruneStrategiesForNames(names));
-          setCombos((prev) => prev.filter((c) => !ids.includes(c.id)));
-          clearSelection();
-          setConfirmState(null);
-          if (failed > 0) alert(`Deleted with ${failed} failure${failed === 1 ? "" : "s"}.`);
-        } catch (error) {
-          console.log("Error bulk deleting combos:", error);
-          alert("Failed to delete selected combos");
-          setConfirmState((prev) => prev ? { ...prev, loading: false } : null);
-        } finally {
-          setBulkBusy(false);
-        }
-      },
-    });
-  };
+  if (loading) return <div className="grid gap-4 md:grid-cols-2"><CardSkeleton /><CardSkeleton /></div>;
+  const fusionCount = combos.filter((c) => comboStrategies[c.name]?.fallbackStrategy === "fusion").length;
+  const enabledAdapters = CAPACITY_ADAPTER_CAPS.filter((cap) => capacityAdapter[cap.key]?.enabled).length;
+  const avgModels = combos.length ? (combos.reduce((sum, c) => sum + c.models.length, 0) / combos.length).toFixed(1) : "0";
 
-  // Merge a per-combo strategy patch into settings.comboStrategies. Passing an empty
-  // patch (strategy back to default "fallback") drops the entry entirely.
-  const handleSetComboStrategy = async (comboName, patch) => {
-    try {
-      const updated = { ...comboStrategies };
-      const next = { ...(updated[comboName] || {}), ...patch };
-      // Prune to keep settings clean: default fallback with no extras = no entry.
-      if (!next.fallbackStrategy || next.fallbackStrategy === "fallback") {
-        delete updated[comboName];
-      } else {
-        updated[comboName] = next;
-      }
-
-      await persistComboStrategies(updated);
-    } catch (error) {
-      console.log("Error updating combo strategy:", error);
-    }
-  };
-
-  const handleBulkSetStrategy = async (strategy) => {
-    if (selectedCombos.length === 0 || !strategy) return;
-    setBulkBusy(true);
-    try {
-      const updated = { ...comboStrategies };
-      for (const combo of selectedCombos) {
-        if (!strategy || strategy === "fallback") {
-          delete updated[combo.name];
-        } else {
-          updated[combo.name] = {
-            ...(updated[combo.name] || {}),
-            fallbackStrategy: strategy,
-          };
-        }
-      }
-      await persistComboStrategies(updated);
-    } catch (error) {
-      console.log("Error bulk updating combo strategy:", error);
-      alert("Failed to update strategy for selected combos");
-    } finally {
-      setBulkBusy(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-6">
-        <CardSkeleton />
-        <CardSkeleton />
+  return <div className="flex flex-col gap-6">
+    <header className="relative overflow-hidden rounded-3xl border border-border-subtle bg-surface p-6 shadow-[var(--shadow-soft)] sm:p-8">
+      <div className="absolute -right-16 -top-20 size-56 rounded-full bg-primary/10 blur-3xl" />
+      <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-primary">Routing layer</p><h1 className="mt-2 text-3xl font-semibold tracking-tight text-text-main">Combos</h1><p className="mt-2 max-w-xl text-sm text-text-muted">Build resilient model routes with fallback, rotation, and panel fusion.</p></div>
+        <div className="flex flex-wrap gap-2"><Button variant="secondary" icon="tune" onClick={() => handleGeneratePresets("cursor")} loading={presetLoading === "cursor"}>Presets</Button><Button icon="add" onClick={() => setShowCreateModal(true)}>New combo</Button></div>
       </div>
-    );
-  }
-
-  return (
-    <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-sm text-text-muted mt-1">
-            Group models under one name, then pick a strategy per combo:
-          </p>
-          <ul className="text-sm text-text-muted mt-2 flex flex-col gap-1">
-            <li><span className="font-medium text-text-main">Fallback</span> — tries models in order (next on failure)</li>
-            <li><span className="font-medium text-text-main">Round Robin</span> — rotates models across requests to spread load</li>
-            <li><span className="font-medium text-text-main">Fusion</span> — queries all models in parallel, then a judge synthesizes one answer. Best quality, but costs the most: every request bills all panel models + the judge (N+1 calls)</li>
-          </ul>
-          <p className="hidden text-xs text-text-muted mt-3 max-w-2xl">
-            <span className="font-medium text-text-main">Cursor / Claude Default</span> create combos named exactly like those clients&apos; model IDs (e.g. <code className="font-mono">composer-2.5</code>, <code className="font-mono">opus</code>), seeded with the matching <code className="font-mono">cu/…</code> or <code className="font-mono">cc/…</code> route so traffic can hit mirai without the prefix.
-            {" "}Note: Cursor IDE itself often blocks built-in Composer / Grok from Override OpenAI Base URL (&quot;model does not support custom API&quot;); add them via Cursor&apos;s <span className="font-medium text-text-main">Add Custom Model</span> using the combo name, or pick a model Cursor allows through the custom endpoint.
-          </p>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-stretch">
-          <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto whitespace-nowrap">
-            Create Combo
-          </Button>
-          <div className="hidden">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="edit_note"
-              loading={presetLoading === "cursor"}
-              disabled={!!presetLoading}
-              onClick={() => handleGeneratePresets("cursor")}
-              className="w-full whitespace-nowrap"
-            >
-              Cursor Default
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="smart_toy"
-              loading={presetLoading === "claude"}
-              disabled={!!presetLoading}
-              onClick={() => handleGeneratePresets("claude")}
-              className="w-full whitespace-nowrap"
-            >
-              Claude Default
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Combos List */}
-      {combos.length === 0 ? (
-        <Card>
-          <div className="text-center py-12">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
-              <span className="material-symbols-outlined text-[32px]">layers</span>
-            </div>
-            <p className="text-text-main font-medium mb-1">No combos yet</p>
-            <p className="text-sm text-text-muted mb-4">Create model combos with fallback support</p>
-            <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
-              Create Combo
-            </Button>
-          </div>
-        </Card>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {/* Selection toolbar */}
-          <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-black/5 bg-black/[0.015] px-3 py-2 dark:border-white/5 dark:bg-white/[0.02] sm:flex-row sm:items-center sm:justify-between">
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-text-muted hover:text-primary select-none">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                ref={(el) => {
-                  if (el) el.indeterminate = someSelected && !allSelected;
-                }}
-                onChange={toggleSelectAll}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
-              />
-              <span>
-                {someSelected
-                  ? `${selectedIds.length} selected`
-                  : `Select all (${combos.length})`}
-              </span>
-            </label>
-
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              {someSelected && (
-                <>
-                  <div className="w-full min-w-[160px] sm:w-[200px]">
-                    <Select
-                      options={STRATEGY_OPTIONS}
-                      value=""
-                      placeholder="Set strategy…"
-                      disabled={bulkBusy}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v) handleBulkSetStrategy(v);
-                      }}
-                      selectClassName="py-1.5 text-xs"
-                    />
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    icon="delete"
-                    disabled={bulkBusy}
-                    loading={bulkBusy}
-                    onClick={handleBulkDelete}
-                    className="whitespace-nowrap"
-                  >
-                    Delete ({selectedIds.length})
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={clearSelection}
-                    disabled={bulkBusy}
-                  >
-                    Clear
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {(() => {
-              const comboByName = Object.fromEntries(combos.map((c) => [c.name, c.models]));
-              return combos.map((combo) => (
-                <ComboCard
-                  key={combo.id}
-                  combo={combo}
-                  getCaps={getCaps}
-                  comboByName={comboByName}
-                  activeProviders={activeProviders}
-                  copied={copied}
-                  onCopy={copy}
-                  onEdit={() => setEditingCombo(combo)}
-                  onDelete={() => handleDelete(combo.id)}
-                  strategy={comboStrategies[combo.name] || {}}
-                  onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
-                  selected={selectedIds.includes(combo.id)}
-                  onToggleSelect={() => toggleSelect(combo.id)}
-                />
-              ));
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* Capacity Adapter */}
-      <CapacityAdapterSection
-        capacityAdapter={capacityAdapter}
-        onChange={handleSetCapacityAdapter}
-        activeProviders={activeProviders}
-        getCaps={getCaps}
-      />
-
-      {/* Create Modal - Use key to force remount and reset state */}
-      {showCreateModal && (
-        <ComboFormModal
-          key="create"
-          isOpen={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
-          onSave={handleCreate}
-          activeProviders={activeProviders}
-        />
-      )}
-
-      {editingCombo && (
-        <ComboFormModal
-          key={editingCombo.id}
-          isOpen={!!editingCombo}
-          combo={editingCombo}
-          onClose={() => setEditingCombo(null)}
-          onSave={(data) => handleUpdate(editingCombo.id, data)}
-          activeProviders={activeProviders}
-        />
-      )}
-
-      {/* Confirm (delete / generate presets) */}
-      <ConfirmModal
-        isOpen={!!confirmState}
-        onClose={() => !confirmState?.loading && setConfirmState(null)}
-        onConfirm={confirmState?.onConfirm}
-        title={confirmState?.title || "Confirm"}
-        message={confirmState?.message}
-        confirmText={confirmState?.confirmText || "Confirm"}
-        variant={confirmState?.variant || "danger"}
-        loading={!!confirmState?.loading}
-      />
-    </div>
-  );
+    </header>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[["layers", "Total combos", combos.length], ["hub", "Avg models", avgModels], ["auto_awesome", "Fusion routes", fusionCount], ["visibility", "Adapters on", enabledAdapters]].map(([icon, label, value]) => <div key={label} className="rounded-2xl border border-border-subtle bg-surface p-4"><span className="material-symbols-outlined text-primary">{icon}</span><p className="mt-4 text-2xl font-semibold text-text-main">{value}</p><p className="text-xs text-text-muted">{label}</p></div>)}</div>
+    <section className="sticky top-2 z-10 rounded-2xl border border-border-subtle bg-surface/95 p-3 shadow-[var(--shadow-soft)] backdrop-blur"><div className="flex flex-col gap-2 lg:flex-row"><div className="relative flex-1"><span className="material-symbols-outlined absolute left-3 top-2.5 text-[18px] text-text-muted">search</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search combos..." className="h-10 w-full rounded-xl border border-border-subtle bg-surface-2 pl-10 pr-3 text-sm text-text-main outline-none focus:border-primary" /></div><select value={strategyFilter} onChange={(e) => setStrategyFilter(e.target.value)} className="h-10 rounded-xl border border-border-subtle bg-surface-2 px-3 text-sm text-text-main"><option value="all">All strategies</option><option value="fallback">Fallback</option><option value="round-robin">Round robin</option><option value="fusion">Fusion</option></select><select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="h-10 rounded-xl border border-border-subtle bg-surface-2 px-3 text-sm text-text-main"><option value="name">Sort: Name</option><option value="models">Sort: Models</option><option value="strategy">Sort: Strategy</option></select><Button variant={selectMode ? "primary" : "secondary"} icon="checklist" onClick={() => { setSelectMode(!selectMode); if (selectMode) clearSelection(); }}>Select</Button></div>{selectMode && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3"><label className="flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={allSelected} onChange={toggleSelectAll} /> Select visible ({visibleCombos.length})</label>{selectedCombos.length > 0 && <><Select options={STRATEGY_OPTIONS} value="" placeholder="Set strategy..." disabled={bulkBusy} onChange={(e) => handleBulkStrategy(e.target.value)} selectClassName="py-1.5 text-xs" /><Button size="sm" variant="danger" icon="delete" onClick={handleBulkDelete} disabled={bulkBusy}>Delete ({selectedCombos.length})</Button></>}</div>}</section>
+    {visibleCombos.length === 0 ? <div className="rounded-3xl border border-dashed border-border-subtle bg-surface p-12 text-center"><span className="material-symbols-outlined text-5xl text-primary/50">layers_clear</span><h2 className="mt-4 text-lg font-semibold text-text-main">{combos.length ? "No matching combos" : "Create your first combo"}</h2><p className="mt-1 text-sm text-text-muted">{combos.length ? "Try another search or strategy filter." : "Combine models into one reliable endpoint."}</p>{!combos.length && <Button className="mt-5" icon="add" onClick={() => setShowCreateModal(true)}>Create combo</Button>}</div> : <div className="grid gap-4 xl:grid-cols-2">{visibleCombos.map((combo) => <ComboCard key={combo.id} combo={combo} strategy={comboStrategies[combo.name] || {}} getCaps={getCaps} comboByName={Object.fromEntries(combos.map((c) => [c.name, c.models]))} selected={selectedIds.includes(combo.id)} selectMode={selectMode} onToggleSelect={() => toggleSelect(combo.id)} onCopy={copy} copied={copied} onEdit={() => setEditingCombo(combo)} onDelete={() => handleDelete(combo.id)} onSetStrategy={(value) => handleSetStrategy(combo.name, value)} />)}</div>}
+    <CapacityAdapterSection capacityAdapter={capacityAdapter} onChange={handleSetCapacityAdapter} activeProviders={activeProviders} getCaps={getCaps} />
+    {showCreateModal && <ComboFormModal key="create" isOpen onClose={() => setShowCreateModal(false)} onSave={handleCreate} activeProviders={activeProviders} />}{editingCombo && <ComboFormModal key={editingCombo.id} isOpen combo={editingCombo} onClose={() => setEditingCombo(null)} onSave={(data) => handleUpdate(editingCombo.id, data)} activeProviders={activeProviders} />}
+    <ConfirmModal isOpen={!!confirmState} onClose={() => !confirmState?.loading && setConfirmState(null)} onConfirm={confirmState?.onConfirm} title={confirmState?.title || "Confirm"} message={confirmState?.message} confirmText={confirmState?.confirmText || "Confirm"} variant={confirmState?.variant || "danger"} loading={!!confirmState?.loading} />
+  </div>;
 }
 
-const fmtK = (n) => {
-  if (!n) return "?";
-  if (n >= 1000000) {
-    const m = n / 1000000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
-  }
-  return `${Math.round(n / 1000)}k`;
-};
-
-function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy, selected = false, onToggleSelect }) {
-  const [showJudgeSelect, setShowJudgeSelect] = useState(false);
-  const current = strategy.fallbackStrategy || "fallback";
-  const judge = strategy.judgeModel || "";
-  const isFusion = current === "fusion";
-  // The synced catalog is server-only, so resolving here would fall back to the
-  // generic patterns and under-report the limits. getCaps carries the server's
-  // answer for /api/models.
-  const comboCaps = aggregateComboCapabilities(combo.models, comboByName, getCaps);
-
-  return (
-    <Card padding="sm" className={`group ${selected ? "ring-1 ring-primary/40 bg-primary/[0.03]" : ""}`}>
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
-          <label className="flex shrink-0 items-center pt-1 sm:pt-0 cursor-pointer" title="Select combo">
-            <input
-              type="checkbox"
-              checked={selected}
-              onChange={onToggleSelect}
-              onClick={(e) => e.stopPropagation()}
-              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-              aria-label={`Select ${combo.name}`}
-            />
-          </label>
-          <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-            <span className="material-symbols-outlined text-primary text-[18px]">layers</span>
-          </div>
-          <div className="min-w-0 flex-1">
-            <code className="block truncate font-mono text-sm font-medium">{combo.name}</code>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
-              {combo.models.length === 0 ? (
-                <span className="text-xs text-text-muted italic">No models</span>
-              ) : (
-                combo.models.slice(0, 3).map((model, index) => (
-                  <code key={index} className="inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5">
-                    <span>{model}</span>
-                    <CapacityBadges caps={
-                      comboByName[model]
-                        ? aggregateComboCapabilities(comboByName[model], comboByName, getCaps)
-                        : getCaps?.(model)
-                    } />
-                  </code>
-                ))
-              )}
-              {combo.models.length > 3 && (
-                <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
-              )}
-            </div>
-            {comboCaps && (
-              <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted">
-                <span>ctx {fmtK(comboCaps.contextWindow)}</span>
-                <span className="opacity-40">·</span>
-                <span>max {fmtK(comboCaps.maxOutput)}</span>
-              </div>
-            )}
-            {/* Fusion: judge picker (Auto = first model) */}
-            {isFusion && (
-              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="text-[11px] font-medium text-text-muted">Judge</span>
-                <button
-                  onClick={() => setShowJudgeSelect(true)}
-                  className="inline-flex max-w-full items-center gap-1 rounded border border-dashed border-primary/40 px-1.5 py-0.5 font-mono text-[11px] text-primary hover:border-primary hover:bg-primary/5 transition-colors"
-                  title="Pick the model that fuses panel answers"
-                >
-                  <span className="material-symbols-outlined text-[13px]">gavel</span>
-                  <span className="truncate">{judge || `Auto — ${combo.models[0] || "first model"}`}</span>
-                </button>
-                {judge && (
-                  <button
-                    onClick={() => onSetStrategy({ judgeModel: "" })}
-                    className="p-0.5 rounded text-text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                    title="Reset judge to Auto"
-                  >
-                    <span className="material-symbols-outlined text-[13px]">close</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3 sm:shrink-0">
-          {/* Strategy selector — always visible */}
-          <div className="w-full sm:w-[200px]">
-            <Select
-              options={STRATEGY_OPTIONS}
-              value={current}
-              onChange={(e) => onSetStrategy({ fallbackStrategy: e.target.value })}
-              selectClassName="py-1.5 text-xs"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-1 sm:flex">
-            <button
-              onClick={(e) => { e.stopPropagation(); onCopy(combo.name, `combo-${combo.id}`); }}
-              className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
-              title="Copy combo name"
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                {copied === `combo-${combo.id}` ? "check" : "content_copy"}
-              </span>
-              <span className="text-[10px] leading-tight">Copy</span>
-            </button>
-            <button
-              onClick={onEdit}
-              className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
-              title="Edit"
-            >
-              <span className="material-symbols-outlined text-[18px]">edit</span>
-              <span className="text-[10px] leading-tight">Edit</span>
-            </button>
-            <button
-              onClick={onDelete}
-              className="flex flex-col items-center rounded px-2 py-1 text-red-500 transition-colors hover:bg-red-500/10"
-              title="Delete"
-            >
-              <span className="material-symbols-outlined text-[18px]">delete</span>
-              <span className="text-[10px] leading-tight">Delete</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Judge model picker (single-select; combo members make natural judges too) */}
-      {showJudgeSelect && (
-        <ModelSelectModal
-          isOpen={showJudgeSelect}
-          onClose={() => setShowJudgeSelect(false)}
-          onSelect={(m) => { onSetStrategy({ judgeModel: m?.value || "" }); setShowJudgeSelect(false); }}
-          activeProviders={activeProviders}
-          title="Select Judge Model"
-          addedModelValues={judge ? [judge] : []}
-          closeOnSelect={true}
-        />
-      )}
-    </Card>
-  );
+function ComboCard({ combo, strategy = {}, getCaps, comboByName = {}, selected, selectMode, onToggleSelect, onCopy, copied, onEdit, onDelete, onSetStrategy }) {
+  const mode = strategy.fallbackStrategy || "fallback";
+  const caps = aggregateComboCapabilities(combo.models, comboByName, getCaps);
+  const colors = { fallback: "text-sky-400 bg-sky-400/10", "round-robin": "text-amber-400 bg-amber-400/10", fusion: "text-fuchsia-400 bg-fuchsia-400/10" };
+  return <article className={`group rounded-3xl border bg-surface p-5 transition hover:-translate-y-0.5 hover:border-primary/50 ${selected ? "border-primary ring-2 ring-primary/20" : "border-border-subtle"}`}><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3">{selectMode && <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select ${combo.name}`} />}<div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary"><span className="material-symbols-outlined">account_tree</span></div><div className="min-w-0"><h2 className="truncate font-mono text-base font-semibold text-text-main">{combo.name}</h2><p className="mt-1 text-xs text-text-muted">{combo.models.length} models in route</p></div></div><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${colors[mode] || colors.fallback}`}>{mode}</span></div><div className="mt-5 flex min-h-14 flex-wrap items-center gap-2 rounded-2xl bg-surface-2 p-3">{combo.models.length ? combo.models.map((model, i) => <span key={`${model}-${i}`} className="inline-flex max-w-full items-center gap-1"><code className="max-w-[180px] truncate rounded-lg border border-border-subtle bg-surface px-2 py-1 text-xs text-text-main">{model}</code>{i < combo.models.length - 1 && <span className="text-primary">?</span>}</span>) : <span className="text-xs text-text-muted">No models configured</span>}</div>{caps && <div className="mt-3 flex gap-3 text-[11px] text-text-muted"><span>Context {fmtK(caps.contextWindow)}</span><span>Output {fmtK(caps.maxOutput)}</span></div>}{mode === "fusion" && <div className="mt-3 flex items-center gap-2 rounded-xl bg-fuchsia-400/10 px-3 py-2 text-xs text-fuchsia-300"><span className="material-symbols-outlined text-sm">gavel</span>Panel fusion enabled</div>}<div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle pt-4"><select value={mode} onChange={(e) => onSetStrategy(e.target.value)} className="rounded-lg border border-border-subtle bg-surface-2 px-2 py-1.5 text-xs text-text-main"><option value="fallback">Fallback</option><option value="round-robin">Round robin</option><option value="fusion">Fusion</option></select><div className="flex gap-1"><button onClick={() => onCopy(combo.name, `combo-${combo.id}`)} className="rounded-lg px-2 py-1.5 text-xs text-text-muted hover:bg-primary/10 hover:text-primary">{copied === `combo-${combo.id}` ? "Copied" : "Copy"}</button><button onClick={onEdit} className="rounded-lg px-2 py-1.5 text-xs text-text-muted hover:bg-primary/10 hover:text-primary">Edit</button><button onClick={onDelete} className="rounded-lg px-2 py-1.5 text-xs text-red-400 hover:bg-red-400/10">Delete</button></div></div></article>;
 }
+
+const fmtK = (n) => { if (!n) return "?"; if (n >= 1000000) return `${Number.isInteger(n / 1000000) ? n / 1000000 : (n / 1000000).toFixed(1)}M`; return `${Math.round(n / 1000)}k`; };
 
 function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, getCaps }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">Vision Adapter</p>
-          <p className="text-xs text-text-muted mt-0.5">
-            Your model can&apos;t read image/audio? Auto-switches to a model in the pool below.
-          </p>
-        </div>
-      </div>
-      <div className="flex flex-col gap-4">
-        {CAPACITY_ADAPTER_CAPS.map((cap) => (
-          <CapacityAdapterCap
-            key={cap.key}
-            cap={cap}
-            entry={capacityAdapter[cap.key] || EMPTY_CAP_ENTRY}
-            onChange={(entry) => onChange({ ...capacityAdapter, [cap.key]: entry })}
-            activeProviders={activeProviders}
-            getCaps={getCaps}
-          />
-        ))}
-      </div>
-    </div>
-  );
+  const enabled = CAPACITY_ADAPTER_CAPS.filter((cap) => capacityAdapter[cap.key]?.enabled).length;
+  return <section className="rounded-3xl border border-border-subtle bg-surface p-5 sm:p-6"><div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Capability routing</p><h2 className="mt-1 text-xl font-semibold text-text-main">Vision adapters</h2><p className="mt-1 text-sm text-text-muted">Redirect requests when target models cannot process input.</p></div><span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">{enabled}/{CAPACITY_ADAPTER_CAPS.length} active</span></div><div className="mt-5 grid gap-4 lg:grid-cols-2">{CAPACITY_ADAPTER_CAPS.map((cap) => <CapacityAdapterCap key={cap.key} cap={cap} entry={capacityAdapter[cap.key] || EMPTY_CAP_ENTRY} onChange={(entry) => onChange({ ...capacityAdapter, [cap.key]: entry })} activeProviders={activeProviders} getCaps={getCaps} />)}</div></section>;
 }
 
 function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) {
   const [showModelSelect, setShowModelSelect] = useState(false);
-  const { enabled, roundRobin, models } = entry;
-
-  const patch = (p) => onChange({ ...entry, ...p });
-
-  const handleAdd = (model) => {
-    const value = model?.value || model?.name || model;
-    if (!value || models.includes(value)) return;
-    patch({ models: [...models, value] });
-  };
-
-  const handleDeselect = (model) => {
-    const value = model?.value || model?.name || model;
-    const next = models.filter((m) => m !== value);
-    patch({ models: next.length === 0 ? [DEFAULT_FALLBACK_MODEL] : next });
-  };
-
-  const handleRemove = (index) => {
-    const next = models.filter((_, i) => i !== index);
-    patch({ models: next.length === 0 ? [DEFAULT_FALLBACK_MODEL] : next });
-  };
-
-  const handleMove = (index, delta) => {
-    const target = index + delta;
-    if (target < 0 || target >= models.length) return;
-    const next = [...models];
-    [next[index], next[target]] = [next[target], next[index]];
-    patch({ models: next });
-  };
-
-  return (
-    <Card padding="sm" className={`group ${!enabled ? "opacity-50" : ""}`}>
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {/* Master toggle + icon + label */}
-        <div className="flex min-w-0 flex-1 items-start gap-2.5 sm:items-center">
-          <Toggle
-            checked={enabled}
-            onChange={(v) => patch({ enabled: v })}
-            aria-label={`Enable ${cap.label} adapter`}
-          />
-          <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-            <span className="material-symbols-outlined text-primary text-[18px]">{cap.icon}</span>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <code className="font-mono text-sm font-medium">{cap.label}</code>
-              <span className="text-[10px] text-text-muted">— {cap.desc}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Actions: Round-robin toggle + Add Model */}
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3 sm:shrink-0">
-          <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer select-none">
-            <Toggle
-              checked={roundRobin}
-              onChange={(v) => patch({ roundRobin: v })}
-              disabled={!enabled}
-              aria-label={`Round-robin ${cap.label} adapter`}
-            />
-            <span>Round</span>
-          </label>
-          <Button
-            icon="add"
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowModelSelect(true)}
-            disabled={!enabled}
-            title={`Add ${cap.label} model`}
-          >
-            Add Model
-          </Button>
-        </div>
-      </div>
-
-      {/* Model pool list/table */}
-      {models.length === 0 ? (
-        <div className="mt-3 py-2 text-center text-xs text-text-muted italic">
-          No models in pool (will fallback to {DEFAULT_FALLBACK_MODEL})
-        </div>
-      ) : (
-        <div className="mt-3 overflow-hidden rounded-lg border border-border/50">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-border/40 bg-black/[0.02] text-text-muted dark:bg-white/[0.02]">
-                <th className="w-12 px-3 py-1.5 font-medium text-center">#</th>
-                <th className="px-3 py-1.5 font-medium">Model</th>
-                <th className="w-24 px-3 py-1.5 font-medium text-center">Order</th>
-                <th className="w-12 px-3 py-1.5 font-medium text-right"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/30 font-mono">
-              {models.map((model, index) => (
-                <tr key={`${model}-${index}`} className="hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors">
-                  <td className="px-3 py-2 text-center text-text-muted text-[11px] font-sans">
-                    #{index + 1}
-                  </td>
-                  <td className="px-3 py-2 text-text-main">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="truncate">{model}</span>
-                      <CapacityBadges caps={getCaps?.(model)} />
-                      {model === DEFAULT_FALLBACK_MODEL && (
-                        <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-sans text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                          free default
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <div className="inline-flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleMove(index, -1)}
-                        disabled={!enabled || index === 0}
-                        className={`p-1 rounded transition-colors ${
-                          !enabled || index === 0
-                            ? "text-text-muted/20 cursor-not-allowed"
-                            : "text-text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5"
-                        }`}
-                        title="Move up"
-                      >
-                        <span className="material-symbols-outlined text-[16px] leading-none">arrow_upward</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleMove(index, 1)}
-                        disabled={!enabled || index === models.length - 1}
-                        className={`p-1 rounded transition-colors ${
-                          !enabled || index === models.length - 1
-                            ? "text-text-muted/20 cursor-not-allowed"
-                            : "text-text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5"
-                        }`}
-                        title="Move down"
-                      >
-                        <span className="material-symbols-outlined text-[16px] leading-none">arrow_downward</span>
-                      </button>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(index)}
-                      disabled={!enabled}
-                      className={`p-1 rounded transition-colors ${
-                        !enabled
-                          ? "text-text-muted/20 cursor-not-allowed"
-                          : "text-text-muted hover:text-red-500 hover:bg-red-500/10"
-                      }`}
-                      title="Remove model"
-                    >
-                      <span className="material-symbols-outlined text-[16px] leading-none">close</span>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {showModelSelect && (
-        <ModelSelectModal
-          isOpen={showModelSelect}
-          onClose={() => setShowModelSelect(false)}
-          onSelect={handleAdd}
-          onDeselect={handleDeselect}
-          activeProviders={activeProviders}
-          title={`Add ${cap.label} Model`}
-          addedModelValues={models}
-          capFilter={cap.key}
-          closeOnSelect={false}
-        />
-      )}
-    </Card>
-  );
+  const patch = (value) => onChange({ ...entry, ...value });
+  const models = entry.models || [];
+  const add = (m) => { const value = m?.value || m?.name || m; if (value && !models.includes(value)) patch({ models: [...models, value] }); };
+  const remove = (m) => patch({ models: models.filter((x) => x !== m) });
+  return <div className={`rounded-2xl border border-border-subtle bg-surface-2 p-4 ${!entry.enabled ? "opacity-60" : ""}`}><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><span className="material-symbols-outlined">{cap.icon}</span></div><div><h3 className="font-semibold text-text-main">{cap.label}</h3><p className="text-xs text-text-muted">{cap.desc}</p></div></div><Toggle checked={entry.enabled} onChange={(value) => patch({ enabled: value })} aria-label={`Enable ${cap.label} adapter`} /></div><div className="mt-4 flex rounded-xl border border-border-subtle bg-surface p-1"><button onClick={() => patch({ roundRobin: false })} className={`flex-1 rounded-lg py-1.5 text-xs ${!entry.roundRobin ? "bg-primary text-white" : "text-text-muted"}`}>Order</button><button onClick={() => patch({ roundRobin: true })} className={`flex-1 rounded-lg py-1.5 text-xs ${entry.roundRobin ? "bg-primary text-white" : "text-text-muted"}`}>Round robin</button></div><div className="mt-4 flex flex-wrap gap-2">{models.map((model) => <span key={model} className="inline-flex max-w-full items-center gap-1 rounded-lg border border-border-subtle bg-surface px-2 py-1 font-mono text-[11px] text-text-main"><span className="max-w-[180px] truncate">{model}</span><button onClick={() => remove(model)} className="text-text-muted hover:text-red-400" aria-label={`Remove ${model}`}>&times;</button></span>)}{!models.length && <span className="text-xs italic text-text-muted">Default fallback: {DEFAULT_FALLBACK_MODEL}</span>}</div><Button className="mt-4" variant="ghost" size="sm" icon="add" onClick={() => setShowModelSelect(true)} disabled={!entry.enabled}>Add model</Button>{showModelSelect && <ModelSelectModal isOpen onClose={() => setShowModelSelect(false)} onSelect={add} onDeselect={(m) => remove(m?.value || m?.name || m)} activeProviders={activeProviders} title={`Add ${cap.label} model`} addedModelValues={models} capFilter={cap.key} closeOnSelect={false} />}</div>;
 }
-
 function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMoveDown, onRemove }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useSortable({ id });
   const style = {
@@ -1006,6 +261,7 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   );
 }
 
+
 function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null }) {
   // Initialize state with combo values - key prop on parent handles reset on remount
   const [name, setName] = useState(combo?.name || "");
@@ -1045,9 +301,12 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     }
   };
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (isOpen) fetchModalData();
+    if (!isOpen) return;
+    void fetchModalData();
   }, [isOpen]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const validateName = (value) => {
     if (!value.trim()) {

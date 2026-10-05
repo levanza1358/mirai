@@ -1,6 +1,7 @@
 import { convertResponsesStreamToJson } from "../../transformer/streamToJsonConverter.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { createErrorResult } from "../../utils/error.js";
+import { isReasoningOnlyTruncation, reasoningTruncationMessage } from "../../utils/reasoningTruncation.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
@@ -113,21 +114,38 @@ function chatCompletionToResponses(responseBody, customToolNames = null) {
 export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
   const chunks = [];
   let streamError = null;
+  let sawDone = false;
+  let sawFinishReason = false;
 
   for (const line of String(rawSSE || "").split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
     const payload = trimmed.slice(5).trim();
-    if (!payload || payload === "[DONE]") continue;
+    if (!payload) continue;
+    if (payload === "[DONE]") {
+      sawDone = true;
+      continue;
+    }
     try {
       const chunk = JSON.parse(payload);
       if (chunk?.error) streamError = chunk.error;
-      else chunks.push(chunk);
+      else {
+        chunks.push(chunk);
+        if (chunk?.choices?.some?.((choice) => choice?.finish_reason)) sawFinishReason = true;
+      }
     } catch { /* ignore malformed lines */ }
   }
 
   if (streamError) return { error: streamError };
   if (chunks.length === 0) return null;
+  if (!sawDone && !sawFinishReason) {
+    return {
+      error: {
+        message: "Upstream SSE stream ended before a terminal event",
+        code: "incomplete_stream"
+      }
+    };
+  }
 
   const first = chunks[0];
   const contentParts = [];
@@ -348,6 +366,15 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
           delete choice.message.reasoning_content;
         }
       }
+    }
+
+    // Reasoning-only truncation: the streamed answer spent the whole max_tokens
+    // budget on reasoning (content empty, finish_reason "length"). Returning an
+    // empty 200 makes the client look like it got a valid-but-blank answer;
+    // report an actionable 400 (client budget issue → no account cooldown).
+    if (sourceFormat !== FORMATS.OPENAI_RESPONSES && (parsed?.choices || []).some(isReasoningOnlyTruncation)) {
+      appendLog({ status: `FAILED ${HTTP_STATUS.BAD_REQUEST}` });
+      return createErrorResult(HTTP_STATUS.BAD_REQUEST, reasoningTruncationMessage(model));
     }
 
     // A Responses-format client (e.g. Codex) forced this provider to stream,

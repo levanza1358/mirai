@@ -19,7 +19,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name } = body;
+    const { name, expiresAt, maxRequests, maxTokens, maxCost } = body;
 
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -27,7 +27,13 @@ export async function POST(request) {
 
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
-    const apiKey = await createApiKey(name, machineId);
+    const limits = {
+      expiresAt: expiresAt || null,
+      maxRequests: Number.isInteger(maxRequests) && maxRequests > 0 ? maxRequests : null,
+      maxTokens: Number.isInteger(maxTokens) && maxTokens > 0 ? maxTokens : null,
+      maxCost: typeof maxCost === "number" && maxCost >= 0 ? maxCost : null,
+    };
+    const apiKey = await createApiKey(name, machineId, limits);
 
     return NextResponse.json({
       key: apiKey.key,

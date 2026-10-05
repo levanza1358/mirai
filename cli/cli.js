@@ -166,11 +166,43 @@ function readPersistedPort() {
   return null;
 }
 
-// Handle `mirai restart` now that the port helpers/constants above are initialized.
+// Handle lifecycle commands after the port helpers/constants above are initialized.
+// `start` is accepted explicitly so scripts and users get the same behavior as the
+// default launcher. `stop` tears down the complete local Mirai process tree.
+function handleStopCommand() {
+  const persisted = readPersistedPort();
+  const requested = (() => {
+    const i = args.findIndex((a) => a === "--port" || a === "-p");
+    return i >= 0 ? parseInt(args[i + 1], 10) : null;
+  })();
+  const portsToKill = [...new Set([requested, persisted, DEFAULT_PORT].filter(Boolean))];
+
+  console.log("🛑 Stopping Mirai and related processes...");
+  Promise.all(portsToKill.map((p) => killByPort(p)))
+    .then(() => killAllAppProcesses(requested || persisted || DEFAULT_PORT))
+    .then(() => Promise.all(portsToKill.map((p) => killProcessOnPort(p))))
+    .then(() => {
+      console.log("✅ Mirai stopped.");
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error(`❌ Stop failed: ${err?.message || err}`);
+      process.exit(1);
+    });
+}
+
+if (args[0] === "stop") {
+  handleStopCommand();
+  return;
+}
+
 if (args[0] === "restart") {
   handleRestartCommand();
   return;
 }
+
+// `start` is a lifecycle alias; remove it before normal option parsing.
+if (args[0] === "start") args.shift();
 
 // First non-internal IPv4 — the address remote peers actually reach when bound to 0.0.0.0.
 function getLanIp() {
@@ -228,7 +260,9 @@ Options:
   -v, --version       Show version
 
 Commands:
-  restart             Restart the running server (same port). Use after
+  start               Build the standalone app if needed, then start Mirai
+  stop                Stop Mirai, proxy, tunnels, and processes on its ports
+  restart             Stop and start Mirai again on the same port. Use after
                       changing the port in the dashboard Settings.
   connect <server-url> Configure Claude Code for a remote mirai server
                       (npx mirai connect http://host:1463 — no install needed)
@@ -555,14 +589,48 @@ if (!fs.existsSync(customServerPath)) {
   const localCustom = path.join(localStandalone, "custom-server.js");
   if (fs.existsSync(localCustom)) customServerPath = localCustom;
 }
-const serverPath = fs.existsSync(customServerPath)
+let serverPath = fs.existsSync(customServerPath)
   ? customServerPath
   : path.join(standaloneDir, "server.js");
 
 if (!fs.existsSync(serverPath)) {
-  console.error("Error: Standalone build not found.");
-  console.error("Please run 'npm run build:cli' first.");
-  process.exit(1);
+  // A source checkout should be usable with `mirai start` without requiring a
+  // separate build command. Build the bundled standalone app once, then retry
+  // path resolution so published packages keep their existing fast path.
+  console.log("📦 Mirai build belum tersedia. Menjalankan build otomatis...");
+  try {
+    const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+    const cliDir = path.join(__dirname);
+    const cliNodeModules = path.join(cliDir, "node_modules");
+    if (!fs.existsSync(cliNodeModules)) {
+      console.log("📥 Dependensi CLI belum tersedia. Menjalankan npm install...");
+      execSync(`${npmCommand} --prefix "${cliDir}" install`, {
+        cwd: path.join(__dirname, ".."),
+        stdio: "inherit",
+        env: { ...process.env },
+      });
+    }
+    execSync(`${npmCommand} --prefix "${cliDir}" run build`, {
+      cwd: path.join(__dirname, ".."),
+      stdio: "inherit",
+      env: { ...process.env },
+    });
+  } catch (err) {
+    console.error(`❌ Build Mirai gagal: ${err?.message || err}`);
+    process.exit(1);
+  }
+
+  customServerPath = path.join(standaloneDir, "custom-server.js");
+  const rebuiltLocal = path.join(__dirname, "..", ".next", "standalone", "custom-server.js");
+  if (!fs.existsSync(customServerPath) && fs.existsSync(rebuiltLocal)) customServerPath = rebuiltLocal;
+  const rebuiltServerPath = fs.existsSync(customServerPath)
+    ? customServerPath
+    : path.join(standaloneDir, "server.js");
+  serverPath = rebuiltServerPath;
+  if (!fs.existsSync(rebuiltServerPath)) {
+    console.error("❌ Build selesai tetapi standalone server tidak ditemukan.");
+    process.exit(1);
+  }
 }
 
 // Start server immediately, then show the interface menu.

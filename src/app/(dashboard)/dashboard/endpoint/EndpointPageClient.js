@@ -23,6 +23,10 @@ export default function APIPageClient({ machineId }) {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyExpiresAt, setNewKeyExpiresAt] = useState("");
+  const [newKeyMaxRequests, setNewKeyMaxRequests] = useState("");
+  const [newKeyMaxTokens, setNewKeyMaxTokens] = useState("");
+  const [newKeyMaxCost, setNewKeyMaxCost] = useState("");
   const [createdKey, setCreatedKey] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
 
@@ -621,7 +625,13 @@ export default function APIPageClient({ machineId }) {
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newKeyName }),
+        body: JSON.stringify({
+          name: newKeyName,
+          expiresAt: newKeyExpiresAt || null,
+          maxRequests: newKeyMaxRequests ? Number(newKeyMaxRequests) : null,
+          maxTokens: newKeyMaxTokens ? Number(newKeyMaxTokens) : null,
+          maxCost: newKeyMaxCost ? Number(newKeyMaxCost) : null,
+        }),
       });
       const data = await res.json();
 
@@ -629,6 +639,10 @@ export default function APIPageClient({ machineId }) {
         setCreatedKey(data.key);
         await fetchData();
         setNewKeyName("");
+        setNewKeyExpiresAt("");
+        setNewKeyMaxRequests("");
+        setNewKeyMaxTokens("");
+        setNewKeyMaxCost("");
         setShowAddModal(false);
       }
     } catch (error) {
@@ -708,8 +722,35 @@ export default function APIPageClient({ machineId }) {
 
   const currentEndpoint = baseUrl;
 
+  const activeKeyCount = keys.filter((key) => key.isActive !== false).length;
+  const limitedKeyCount = keys.filter((key) => key.maxRequests || key.maxTokens || key.maxCost || key.expiresAt).length;
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Access control</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-text-main">API Keys</h1>
+          <p className="mt-1 max-w-2xl text-sm text-text-muted">Manage endpoint access, key rotation, and usage limits from one clean workspace.</p>
+        </div>
+        <Button icon="add" onClick={() => setShowAddModal(true)}>New API key</Button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {[
+          ["vpn_key", "Total keys", keys.length, "All issued keys"],
+          ["verified_user", "Active", activeKeyCount, "Ready for requests"],
+          ["speed", "Protected", limitedKeyCount, "With expiry or limits"],
+        ].map(([icon, label, value, hint]) => (
+          <div key={label} className="rounded-2xl border border-border-subtle bg-surface p-4 shadow-[var(--shadow-soft)]">
+            <div className="flex items-center justify-between">
+              <span className="material-symbols-outlined text-primary">{icon}</span>
+              <span className="text-2xl font-semibold text-text-main">{value}</span>
+            </div>
+            <p className="mt-3 text-sm font-medium text-text-main">{label}</p>
+            <p className="text-xs text-text-muted">{hint}</p>
+          </div>
+        ))}
+      </div>
       {/* Endpoint Card */}
       <Card>
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -956,15 +997,14 @@ export default function APIPageClient({ machineId }) {
       </Card>
 
       {/* API Keys */}
-      <Card id="require-api-key">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary">vpn_key</span>
-            API Keys
-          </h2>
-          <Button icon="add" onClick={() => setShowAddModal(true)}>
-            Create Key
-          </Button>
+      <Card id="require-api-key" className="overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-border-subtle pb-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Key vault</p>
+            <h2 className="mt-1 text-lg font-semibold text-text-main">Issued credentials</h2>
+            <p className="text-sm text-text-muted">Each key can have its own lifecycle and usage policy.</p>
+          </div>
+          <Button icon="add" onClick={() => setShowAddModal(true)}>Create key</Button>
         </div>
 
         <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
@@ -1030,7 +1070,15 @@ export default function APIPageClient({ machineId }) {
                   </div>
                   <p className="text-xs text-text-muted mt-1">
                     Created {new Date(key.createdAt).toLocaleDateString()}
+                    {key.expiresAt ? ` · Expires ${new Date(key.expiresAt).toLocaleDateString()}` : " · No expiry"}
                   </p>
+                  {(key.maxRequests || key.maxTokens || key.maxCost) && (
+                    <p className="text-xs text-text-muted mt-1">
+                      Limits: {key.maxRequests ? `${key.requestCount || 0}/${key.maxRequests} requests` : "requests unlimited"}
+                      {key.maxTokens ? ` · ${key.tokenCount || 0}/${key.maxTokens} tokens` : " · tokens unlimited"}
+                      {key.maxCost ? ` · $${Number(key.costAccum || 0).toFixed(2)}/$${Number(key.maxCost).toFixed(2)}` : " · cost unlimited"}
+                    </p>
+                  )}
                   {key.isActive === false && (
                     <p className="text-xs text-orange-500 mt-1">Paused</p>
                   )}
@@ -1075,6 +1123,10 @@ export default function APIPageClient({ machineId }) {
         onClose={() => {
           setShowAddModal(false);
           setNewKeyName("");
+        setNewKeyExpiresAt("");
+        setNewKeyMaxRequests("");
+        setNewKeyMaxTokens("");
+        setNewKeyMaxCost("");
         }}
       >
         <div className="flex flex-col gap-4">
@@ -1084,6 +1136,13 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setNewKeyName(e.target.value)}
             placeholder="Production Key"
           />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input label="Expires on" type="date" value={newKeyExpiresAt} onChange={(e) => setNewKeyExpiresAt(e.target.value)} />
+            <Input label="Max requests" type="number" min="1" value={newKeyMaxRequests} onChange={(e) => setNewKeyMaxRequests(e.target.value)} placeholder="Unlimited" />
+            <Input label="Max tokens" type="number" min="1" value={newKeyMaxTokens} onChange={(e) => setNewKeyMaxTokens(e.target.value)} placeholder="Unlimited" />
+            <Input label="Max cost" type="number" min="0" step="0.01" value={newKeyMaxCost} onChange={(e) => setNewKeyMaxCost(e.target.value)} placeholder="Unlimited" />
+          </div>
+          <p className="text-xs text-text-muted">Leave limits empty for unlimited usage.</p>
           <div className="flex gap-2">
             <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
               Create
