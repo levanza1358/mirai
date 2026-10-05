@@ -97,9 +97,23 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
 
 **That's it!** Start coding with FREE AI models.
 
-**Alternative: run from source (this repository):**
+**Alternative: install this GitHub checkout:**
 
-This repository package is private (`mirai-app`), so source/Docker execution is the expected local development path.
+Linux/macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/levanza1358/mirai/main/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+$tmp = Join-Path $env:TEMP "mirai-install.cmd"; Invoke-WebRequest https://raw.githubusercontent.com/levanza1358/mirai/main/install.cmd -OutFile $tmp; & $tmp
+```
+
+Installer clones `levanza1358/mirai` to `~/mirai` (`%USERPROFILE%\\mirai` on Windows), runs `npm install`, creates `.env` from `.env.example` when missing, and does not overwrite local changes. Start it with `npm run dev` from that directory.
+
+**Run from an existing source checkout:**
 
 ```bash
 cp .env.example .env

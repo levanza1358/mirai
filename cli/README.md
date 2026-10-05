@@ -74,6 +74,22 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
 
 That's it! Start coding with FREE AI models.
 
+**Install this GitHub source checkout instead:**
+
+Linux/macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/levanza1358/mirai/main/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+$tmp = Join-Path $env:TEMP "mirai-install.cmd"; Invoke-WebRequest https://raw.githubusercontent.com/levanza1358/mirai/main/install.cmd -OutFile $tmp; & $tmp
+```
+
+The installer clones the source repository to `~/mirai` (`%USERPROFILE%\\mirai` on Windows), runs `npm install`, and creates `.env` from `.env.example` only if `.env` is missing. It refuses to overwrite an existing target directory. Start the development server with `npm run dev` from the clone. Use `npm install -g mirai` for the published desktop launcher instead.
+
 ---
 
 ## 🚀 CLI Options

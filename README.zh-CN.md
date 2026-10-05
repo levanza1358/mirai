@@ -1,4 +1,4 @@
-﻿
+
 <div align="center">
   <img src="./images/mirai.png?1" alt="Mirai Dashboard" width="800"/>
   
@@ -95,16 +95,29 @@ Claude Code/Codex/OpenClaw/Cursor/Cline è®¾ç½®ï¼š
 
 **å°±è¿™ä¹ˆç®€å•ï¼** å¼€å§‹ä½¿ç”¨å…è´¹ AI æ¨¡åž‹ç¼–ç¨‹ã€‚
 
-**æ›¿ä»£æ–¹æ¡ˆï¼šä»Žæºç è¿è¡Œï¼ˆæœ¬ä»“åº“ï¼‰ï¼š**
+**替代方案：从 GitHub 安装源码：**
 
-æœ¬ä»“åº“çš„åŒ…æ˜¯ç§æœ‰çš„ï¼ˆ`mirai-app`ï¼‰ï¼Œæ‰€ä»¥æºç /Docker æ‰§è¡Œæ˜¯é¢„æœŸçš„æœ¬åœ°å¼€å‘æ–¹å¼ã€‚
+Linux/macOS：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/levanza1358/mirai/main/install.sh | bash
+```
+
+Windows PowerShell：
+
+```powershell
+$tmp = Join-Path $env:TEMP "mirai-install.cmd"; Invoke-WebRequest https://raw.githubusercontent.com/levanza1358/mirai/main/install.cmd -OutFile $tmp; & $tmp
+```
+
+安装器将仓库克隆到 `~/mirai`（Windows 为 `%USERPROFILE%\\mirai`），运行 `npm install`，并在 `.env` 不存在时从 `.env.example` 创建。若目标目录已存在，安装器会停止，不覆盖文件。安装后进入目录并运行 `npm run dev`。
+
+**从已有源码目录运行：**
 
 ```bash
 cp .env.example .env
 npm install
 PORT=1463 NEXT_PUBLIC_BASE_URL=http://localhost:1463 npm run dev
 ```
-
 ç”Ÿäº§æ¨¡å¼ï¼š
 
 ```bash
