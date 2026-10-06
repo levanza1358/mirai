@@ -37,6 +37,9 @@ export const RESPONSES_ITEM = {
   OUTPUT_TEXT: "output_text",
   INPUT_TEXT: "input_text",
   INPUT_IMAGE: "input_image",
+  // Responses API attachment block (Chat Completions calls it "file"). Clients
+  // such as VS Code Copilot Chat send `{ type: "input_file", file_data|file_url|file_id }`.
+  INPUT_FILE: "input_file",
   SUMMARY_TEXT: "summary_text",
 };
 

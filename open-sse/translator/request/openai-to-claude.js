@@ -4,6 +4,7 @@ import { CLAUDE_SYSTEM_PROMPT } from "../../config/appConstants.js";
 import { adjustMaxTokens } from "../formats/maxTokens.js";
 import { safeParseJSON } from "../concerns/json.js";
 import { parseDataUri } from "../concerns/image.js";
+import { extractAttachmentText } from "../concerns/attachments.js";
 import { extractTextContent } from "../formats/gemini.js";
 import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK } from "../schema/index.js";
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
@@ -240,7 +241,10 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map()) {
         } else if (part.type === OPENAI_BLOCK.IMAGE && part.source) {
           blocks.push({ type: CLAUDE_BLOCK.IMAGE, source: part.source });
         } else if (part.type === OPENAI_BLOCK.FILE && part.file) {
-          // OpenAI file block -> Claude document (PDF only; Claude rejects other mimes).
+          // OpenAI file block -> Claude document (PDF only; Claude rejects other
+          // mimes as a document). Non-PDF attachments (e.g. .docx) are extracted
+          // to text instead of being silently dropped — dropping them loses the
+          // user's file without any error.
           const fileData = part.file.file_data;
           const parsed = parseDataUri(fileData);
           if (parsed && parsed.mimeType === "application/pdf") {
@@ -248,6 +252,19 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map()) {
               type: CLAUDE_BLOCK.DOCUMENT,
               source: { type: "base64", media_type: parsed.mimeType, data: parsed.base64 }
             });
+          } else {
+            // `parseDataUri` gives { mimeType, base64 }; decode to bytes for the
+            // extractor. Non-data URIs (http URLs) are left alone.
+            const extracted = parsed
+              ? extractAttachmentText(Buffer.from(parsed.base64, "base64"), parsed.mimeType)
+              : null;
+            if (extracted) {
+              const label = part.file.filename || "attachment";
+              blocks.push({
+                type: CLAUDE_BLOCK.TEXT,
+                text: `<attachment filename="${label}">\n${extracted}\n</attachment>`
+              });
+            }
           }
         }
       }

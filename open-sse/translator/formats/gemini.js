@@ -1,6 +1,7 @@
 // Gemini helper functions for translator
 
 import { safeParseJSON } from "../concerns/json.js";
+import { extractAttachmentText } from "../concerns/attachments.js";
 import { OPENAI_BLOCK } from "../schema/index.js";
 
 // Unsupported JSON Schema constraints that should be removed for Antigravity
@@ -100,7 +101,16 @@ export function convertOpenAIContentToParts(content) {
         if (commaIndex !== -1) {
           const mimeType = url.substring(5, commaIndex).split(";")[0];
           const data = url.substring(commaIndex + 1);
-          parts.push({ inlineData: { mime_type: mimeType, data: data } });
+          // Gemini accepts PDFs and images as inlineData, but not OOXML
+          // (.docx/.doc). Extract those to text so the content is not lost and
+          // the request is not rejected.
+          const extracted = extractAttachmentText(Buffer.from(data, "base64"), mimeType);
+          if (extracted) {
+            const label = item.file.filename || "attachment";
+            parts.push({ text: `<attachment filename="${label}">\n${extracted}\n</attachment>` });
+          } else {
+            parts.push({ inlineData: { mime_type: mimeType, data } });
+          }
         }
       }
     }

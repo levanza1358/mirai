@@ -13,6 +13,7 @@ import {
   coerceResponsesOutput,
 } from "../formats/responsesApi.js";
 import { ROLE, OPENAI_BLOCK, RESPONSES_ITEM } from "../schema/index.js";
+import { responsesBlockToChatBlock } from "../concerns/responsesBlocks.js";
 
 const MAX_TOOL_NAME_LEN = 128;
 
@@ -80,17 +81,12 @@ export function openaiResponsesToOpenAIRequest(model, body, stream, credentials)
         pendingToolResults = [];
       }
 
-      // Convert content: input_text → text, output_text → text, input_image → image_url
+      // Convert content: input_text → text, output_text → text,
+      // input_image → image_url, input_file → file (Chat Completions shape).
+      // Leaving `input_file` untouched makes providers reject the request with
+      // "400 Unsupported input[].content[] type:'input_file'".
       const content = Array.isArray(item.content)
-        ? item.content.map(c => {
-          if (c.type === RESPONSES_ITEM.INPUT_TEXT) return { type: OPENAI_BLOCK.TEXT, text: c.text };
-          if (c.type === RESPONSES_ITEM.OUTPUT_TEXT) return { type: OPENAI_BLOCK.TEXT, text: c.text };
-          if (c.type === RESPONSES_ITEM.INPUT_IMAGE) {
-            const url = c.image_url || c.file_id || "";
-            return { type: OPENAI_BLOCK.IMAGE_URL, image_url: { url, detail: c.detail || "auto" } };
-          }
-          return c;
-        })
+        ? item.content.map(c => responsesBlockToChatBlock(c)).filter(Boolean)
         : item.content;
       const msg = { role: item.role, content };
       // Attach buffered reasoning to assistant turn (required by xiaomi-mimo + store=false continuity)
