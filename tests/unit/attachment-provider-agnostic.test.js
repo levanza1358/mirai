@@ -107,6 +107,41 @@ describe("attachment extraction: Word / Excel / text", () => {
     expect(text).toContain("42");
   });
 
+  it("reads EVERY worksheet, labelled by name", () => {
+    const multi = buildZip({
+      "xl/workbook.xml": `<?xml version="1.0"?><workbook xmlns="x" xmlns:r="r"><sheets>
+<sheet name="Karyawan" sheetId="1" r:id="rId1"/>
+<sheet name="Gaji" sheetId="2" r:id="rId2"/>
+</sheets></workbook>`,
+      "xl/_rels/workbook.xml.rels": `<?xml version="1.0"?><Relationships xmlns="x">
+<Relationship Id="rId1" Type="w" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="w" Target="worksheets/sheet2.xml"/>
+</Relationships>`,
+      "xl/sharedStrings.xml": `<?xml version="1.0"?><sst xmlns="x">
+<si><t>Budi</t></si><si><t>Gaji Pokok</t></si><si><t>5000000</t></si>
+</sst>`,
+      "xl/worksheets/sheet1.xml": `<?xml version="1.0"?><worksheet xmlns="x"><sheetData>
+<row r="1"><c r="A1" t="s"><v>0</v></c></row>
+</sheetData></worksheet>`,
+      "xl/worksheets/sheet2.xml": `<?xml version="1.0"?><worksheet xmlns="x"><sheetData>
+<row r="1"><c r="A1" t="s"><v>1</v></c><c r="B1" t="s"><v>2</v></c></row>
+</sheetData></worksheet>`,
+    });
+
+    const text = extractAttachmentText(multi, XLSX_MIME);
+    // Both sheets are present, and each is labelled so the model can tell them apart.
+    expect(text).toContain("--- Sheet: Karyawan ---");
+    expect(text).toContain("--- Sheet: Gaji ---");
+    expect(text).toContain("Budi");
+    expect(text).toContain("Gaji Pokok");
+    expect(text).toContain("5000000");
+  });
+
+  it("labels nothing when the workbook has a single sheet", () => {
+    const text = extractAttachmentText(xlsx(), XLSX_MIME);
+    expect(text).not.toContain("--- Sheet:");
+  });
+
   it("extracts plain text", () => {
     expect(extractAttachmentText(Buffer.from("halo dunia"), "text/plain")).toBe("halo dunia");
   });

@@ -111,6 +111,73 @@ function xmlToText(xml) {
 }
 
 /**
+ * List the worksheet parts in workbook order, with their display names.
+ * Falls back to sheet1..sheetN when workbook.xml is unavailable.
+ */
+function listWorksheetParts(zipBytes) {
+  const workbook = readZipEntry(zipBytes, "xl/workbook.xml")?.toString("utf8");
+  const rels = readZipEntry(zipBytes, "xl/_rels/workbook.xml.rels")?.toString("utf8");
+
+  // r:id -> target path (e.g. "worksheets/sheet1.xml")
+  const relTargets = new Map();
+  if (rels) {
+    const relRe = /<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/gi;
+    let m;
+    while ((m = relRe.exec(rels))) {
+      const id = m[1];
+      let target = m[2].replace(/^\/?xl\//, "").replace(/^\.\//, "");
+      if (!target.startsWith("worksheets/")) target = `worksheets/${target.split("/").pop()}`;
+      relTargets.set(id, `xl/${target}`);
+    }
+  }
+
+  const sheets = [];
+  if (workbook) {
+    const sheetRe = /<sheet\b([^>]*)\/?>/gi;
+    let m;
+    while ((m = sheetRe.exec(workbook))) {
+      const attrs = m[1];
+      const name = attrs.match(/name="([^"]*)"/i)?.[1] ?? "";
+      const rid = attrs.match(/r:id="([^"]+)"/i)?.[1];
+      const target = rid ? relTargets.get(rid) : null;
+      if (target) sheets.push({ name: decodeXml(name), part: target });
+    }
+  }
+
+  if (sheets.length) return sheets;
+
+  // No workbook metadata: probe sheet1..sheetN directly.
+  for (let i = 1; i <= 20; i++) {
+    const part = `xl/worksheets/sheet${i}.xml`;
+    if (readZipEntry(zipBytes, part)) sheets.push({ name: `Sheet${i}`, part });
+    else if (i > 1) break;
+  }
+  return sheets;
+}
+
+/**
+ * Extract every worksheet, labelled by its display name.
+ * A workbook routinely has more than one sheet; reading only sheet1 silently
+ * hides the rest of the user's data.
+ */
+function workbookToText(zipBytes) {
+  const shared = parseSharedStrings(readZipEntry(zipBytes, "xl/sharedStrings.xml")?.toString("utf8"));
+  const sheets = listWorksheetParts(zipBytes);
+  if (!sheets.length) return null;
+
+  const sections = [];
+  const multi = sheets.length > 1;
+  for (const sheet of sheets) {
+    const xml = readZipEntry(zipBytes, sheet.part);
+    if (!xml) continue;
+    const text = sheetXmlToText(xml.toString("utf8"), shared);
+    if (!text) continue;
+    sections.push(multi ? `--- Sheet: ${sheet.name} ---\n${text}` : text);
+  }
+  return sections.join("\n\n").trim() || null;
+}
+
+/**
  * Turn a spreadsheet sheet into readable rows.
  * Cells reference shared strings by index (`t="s"`), which is how text values
  * are stored; numbers are inline.
@@ -177,13 +244,10 @@ export function extractAttachmentText(bytes, mimeType, filename = "") {
 
   const mime = String(mimeType).toLowerCase();
 
-  // Spreadsheet: needs the shared-strings table to resolve text cells.
+  // Spreadsheet: needs the shared-strings table to resolve text cells, and must
+  // cover every worksheet (not just the first).
   if (mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
-    const shared = parseSharedStrings(readZipEntry(buf, "xl/sharedStrings.xml")?.toString("utf8"));
-    const sheet = readZipEntry(buf, "xl/worksheets/sheet1.xml");
-    if (!sheet) return null;
-    const text = sheetXmlToText(sheet.toString("utf8"), shared);
-    return text || null;
+    return workbookToText(buf);
   }
 
   const parts = ZIP_TEXT_PARTS[mime];
