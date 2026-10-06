@@ -14,6 +14,42 @@ import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { detectModelRetirement } from "../../utils/antigravityModels.js";
+
+// Collect assistant-visible text from any of the response shapes this handler
+// sees (Antigravity/Gemini envelope, OpenAI choices, Claude content blocks,
+// raw string). Used only for the retired-model notice check.
+function extractResponseText(responseBody) {
+  if (!responseBody) return "";
+  if (typeof responseBody === "string") return responseBody;
+
+  // Gemini-family providers wrap the payload: { response: { candidates: [...] } }.
+  // Unwrap before walking candidates, otherwise the notice is never seen.
+  const body = responseBody.response && typeof responseBody.response === "object"
+    ? responseBody.response
+    : responseBody;
+
+  const chunks = [];
+
+  const pushText = (value) => {
+    if (typeof value === "string" && value) chunks.push(value);
+  };
+
+  for (const choice of body.choices || []) {
+    pushText(choice?.message?.content);
+    pushText(choice?.text);
+  }
+  for (const block of body.content || []) {
+    pushText(block?.text);
+  }
+  for (const candidate of body.candidates || []) {
+    for (const part of candidate?.content?.parts || []) {
+      if (part?.thought !== true) pushText(part?.text);
+    }
+  }
+
+  return chunks.join("\n");
+}
 
 function parseToolArguments(value) {
   if (!value) return {};
@@ -312,6 +348,22 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   // bare OpenAI body and usage tracking sees data.usage. No-op unless the
   // provider opts in via transport.quirks.clineEnvelope.
   responseBody = unwrapClineEnvelope(responseBody, provider);
+
+  // Retired-model guard: a model pulled upstream (e.g. Antigravity's Claude 4.6)
+  // answers a NORMAL 200 whose text is a short "no longer available, please
+  // switch to X" notice instead of a completion. Without this the notice is
+  // returned to the client as if the model had replied, so callers silently get
+  // a bogus answer. Surface it as a real error instead.
+  const retirement = detectModelRetirement(extractResponseText(responseBody));
+  if (retirement) {
+    const replacement = retirement.replacement ? ` Please switch to ${retirement.replacement}.` : "";
+    appendLog({ status: `FAILED ${HTTP_STATUS.BAD_REQUEST}` });
+    console.warn(`[ChatCore] Model "${model}" retired upstream: ${retirement.message}`);
+    return createErrorResult(
+      HTTP_STATUS.BAD_REQUEST,
+      `Model "${model}" has been retired upstream and no longer returns completions.${replacement}`
+    );
+  }
 
   reqLogger.logProviderResponse(providerResponse.status, providerResponse.statusText, providerResponse.headers, responseBody);
   if (onRequestSuccess) {

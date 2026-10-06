@@ -3,6 +3,7 @@ import { FORMATS } from "../translator/formats.js";
 import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
 import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, logUsage, addBufferToUsage, filterUsageForFormat, COLORS } from "./usageTracking.js";
 import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE } from "./streamHelpers.js";
+import { detectModelRetirement } from "./antigravityModels.js";
 import { getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent, formatIncompleteOpenAIResponsesStreamFailure } from "./responsesStreamHelpers.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
 
@@ -89,6 +90,8 @@ export function createSSEStream(options = {}) {
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let finalized = false;
   let completionFlushTimer = null;
+  // Set once the first assistant text has been checked for a retired-model notice.
+  let retirementChecked = false;
 
   // Usage/logging tail, callable from transform() as well as flush(): a client that
   // closes right after the terminal event cancels the reader, and flush() never runs.
@@ -221,6 +224,34 @@ export function createSSEStream(options = {}) {
                 accumulatedThinking += reasoning;
               }
 
+              // Retired-model guard for the passthrough path. A model pulled
+              // upstream answers a normal 200 stream whose text is a short
+              // "no longer available, please switch to X" notice. Emitting it
+              // would look like a valid answer, so fail loudly instead.
+              // (The translate path has the same check further below.)
+              // NB: do NOT latch until text actually arrives — the first chunk of
+              // a stream is usually the assistant role with no content.
+              if (!retirementChecked && accumulatedContent.length > 0) {
+                const retirement = detectModelRetirement(accumulatedContent);
+                if (retirement) {
+                  retirementChecked = true;
+                  const replacement = retirement.replacement ? ` Please switch to ${retirement.replacement}.` : "";
+                  const payload = `data: ${JSON.stringify({
+                    error: {
+                      message: `Model "${model}" has been retired upstream and no longer returns completions.${replacement}`,
+                      type: "invalid_request_error",
+                      code: "model_retired",
+                    },
+                  })}\n\n`;
+                  reqLogger?.appendConvertedChunk?.(payload);
+                  controller.enqueue(sharedEncoder.encode(payload));
+                  controller.enqueue(sharedEncoder.encode("data: [DONE]\n\n"));
+                  streamDoneSent = true;
+                  finalizeStream();
+                  return;
+                }
+              }
+
               const extracted = extractUsage(parsed);
               if (extracted) {
                 usage = mergeUsage(usage, extracted);
@@ -336,9 +367,12 @@ export function createSSEStream(options = {}) {
           accumulatedThinking += parsed.choices[0].delta.reasoning_content;
         }
         
-        // Gemini format
-        if (parsed.candidates?.[0]?.content?.parts) {
-          for (const part of parsed.candidates[0].content.parts) {
+        // Gemini format. Providers in this family wrap the payload as
+        // { response: { candidates: [...] } } (Antigravity does); handle both the
+        // wrapped and bare shape so assistant text is always accumulated.
+        const geminiBody = parsed.response && typeof parsed.response === "object" ? parsed.response : parsed;
+        if (geminiBody.candidates?.[0]?.content?.parts) {
+          for (const part of geminiBody.candidates[0].content.parts) {
             if (part.text && typeof part.text === "string") {
               totalContentLength += part.text.length;
               // Check if this is thinking content
@@ -354,6 +388,33 @@ export function createSSEStream(options = {}) {
         // Extract usage
         const extracted = extractUsage(parsed);
         if (extracted) state.usage = mergeUsage(state.usage, extracted); // Keep original usage for logging
+
+        // Retired-model guard for the translate path (mirrors the passthrough
+        // guard above). A model pulled upstream answers a normal 200 stream whose
+        // text is a short "no longer available, please switch to X" notice;
+        // relayed as-is it looks like a valid answer, so fail loudly instead.
+        // NB: do NOT latch until text actually arrives — the first chunk of a
+        // stream is usually the assistant role with no content.
+        if (!retirementChecked && accumulatedContent.length > 0) {
+          const retirement = detectModelRetirement(accumulatedContent);
+          if (retirement) {
+            retirementChecked = true;
+            const replacement = retirement.replacement ? ` Please switch to ${retirement.replacement}.` : "";
+            const payload = `data: ${JSON.stringify({
+              error: {
+                message: `Model "${model}" has been retired upstream and no longer returns completions.${replacement}`,
+                type: "invalid_request_error",
+                code: "model_retired",
+              },
+            })}\n\n`;
+            reqLogger?.appendConvertedChunk?.(payload);
+            controller.enqueue(sharedEncoder.encode(payload));
+            controller.enqueue(sharedEncoder.encode("data: [DONE]\n\n"));
+            streamDoneSent = true;
+            finalizeStream();
+            return;
+          }
+        }
 
         // Responses same-format passthrough: re-emit with original event framing
         if (keepsOpenAIResponsesFormat && openAIResponsesEventName) {

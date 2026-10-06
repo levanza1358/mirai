@@ -7,6 +7,7 @@ import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { detectModelRetirement } from "../../utils/antigravityModels.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
@@ -375,6 +376,24 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     if (sourceFormat !== FORMATS.OPENAI_RESPONSES && (parsed?.choices || []).some(isReasoningOnlyTruncation)) {
       appendLog({ status: `FAILED ${HTTP_STATUS.BAD_REQUEST}` });
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, reasoningTruncationMessage(model));
+    }
+
+    // Retired-model guard: a model pulled upstream (e.g. Antigravity's Claude 4.6)
+    // answers a NORMAL 200 stream whose text is a short "no longer available,
+    // please switch to X" notice instead of a completion. Returning that as a
+    // successful answer makes the caller believe the model replied. Report an
+    // actionable 400 instead. Mirrors the check in nonStreamingHandler.js.
+    const retiredNotice = detectModelRetirement(
+      (parsed?.choices || []).map((c) => c?.message?.content).filter(Boolean).join("\n")
+    );
+    if (retiredNotice) {
+      const replacement = retiredNotice.replacement ? ` Please switch to ${retiredNotice.replacement}.` : "";
+      appendLog({ status: `FAILED ${HTTP_STATUS.BAD_REQUEST}` });
+      console.warn(`[ChatCore] Model "${model}" retired upstream: ${retiredNotice.message}`);
+      return createErrorResult(
+        HTTP_STATUS.BAD_REQUEST,
+        `Model "${model}" has been retired upstream and no longer returns completions.${replacement}`
+      );
     }
 
     // A Responses-format client (e.g. Codex) forced this provider to stream,

@@ -211,13 +211,39 @@ const PROVIDER_MODELS_CONFIG = {
     })
   },
   antigravity: {
-    url: "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
+    // The authoritative per-account model list. The previous config pointed at
+    // `daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models`, which is a
+    // sandbox host serving a different endpoint — it returned the wrong shape
+    // (or nothing), so the dashboard showed the stale static registry instead of
+    // what the account can actually use. fetchAvailableModels is the same call
+    // the official Antigravity IDE makes.
+    url: "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      // The real IDE identifies itself; the sandbox host fingerprints other
+      // clients and refuses to provision.
+      "User-Agent": "antigravity/ide/2.11.0 darwin/arm64",
+    },
     authHeader: "Authorization",
     authPrefix: "Bearer ",
-    body: {},
-    parseResponse: (data) => data.models || []
+    // fetchAvailableModels expects the project id in the body.
+    body: ({ connection }) => ({ project: connection?.projectId || connection?.providerSpecificData?.projectId }),
+    parseResponse: (data) => {
+      // Shape: { models: { "<bare-id>": { displayName, supportsImages, ... } } }
+      if (data?.models && typeof data.models === "object" && !Array.isArray(data.models)) {
+        return Object.entries(data.models)
+          // `chat_*` / `tab_*` entries are IDE UI affordances, not chat models.
+          .filter(([id]) => !/^(?:chat_|tab_)/i.test(id))
+          .map(([id, info]) => ({
+            id,
+            name: info?.displayName || id,
+            ...(info?.recommended ? { isDefault: true } : {}),
+          }));
+      }
+      if (Array.isArray(data?.models)) return data.models;
+      return [];
+    },
   },
   github: {
     url: "https://api.githubcopilot.com/models",
@@ -719,7 +745,11 @@ export async function GET(request, { params }) {
     };
 
     if (config.body && config.method === "POST") {
-      fetchOptions.body = JSON.stringify(config.body);
+      // `body` may be a function of the connection when the endpoint needs a
+      // per-account field (e.g. Antigravity's fetchAvailableModels takes the
+      // project id).
+      const resolvedBody = typeof config.body === "function" ? config.body({ connection }) : config.body;
+      fetchOptions.body = JSON.stringify(resolvedBody ?? {});
     }
 
     const response = await fetch(url, fetchOptions);
@@ -734,7 +764,7 @@ export async function GET(request, { params }) {
     }
 
     const data = await response.json();
-    const models = config.parseResponse(data);
+    const models = config.parseResponse(data, { connection });
 
     return NextResponse.json({
       provider: connection.provider,
