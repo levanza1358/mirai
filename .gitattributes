@@ -1,0 +1,8 @@
+# Always check out shell launchers with executable permission (Linux/macOS).
+# Without this, `./mirai start` fails with "Permission denied" after a fresh clone.
+mirai text eol=lf executable
+install.sh text eol=lf
+start.sh text eol=lf
+mirai.cmd text eol=crlf
+
+*.sh text eol=lf

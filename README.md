@@ -97,7 +97,7 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
 
 **That's it!** Start coding with FREE AI models.
 
-**Alternative: install this GitHub checkout:**
+**Alternative: install this GitHub checkout (one command):**
 
 Linux/macOS:
 
@@ -111,7 +111,29 @@ Windows PowerShell:
 $tmp = Join-Path $env:TEMP "mirai-install.cmd"; Invoke-WebRequest https://raw.githubusercontent.com/levanza1358/mirai/main/install.cmd -OutFile $tmp; & $tmp
 ```
 
-Installer clones `levanza1358/mirai` to `~/mirai` (`%USERPROFILE%\\mirai` on Windows), runs `npm install`, creates `.env` from `.env.example` when missing, and does not overwrite local changes. Start it with `npm run dev` from that directory.
+The installer is idempotent and does everything needed to get running:
+
+| Step | Detail |
+| --- | --- |
+| Check tooling | requires `git` and **Node.js 20+**; warns when `lsof` is missing |
+| Get sources | clones `levanza1358/mirai` into `~/mirai` (`%USERPROFILE%\mirai`), or updates it if already present |
+| Dependencies | runs `npm install` |
+| **`.env`** | copies `.env.example` and replaces every `change-me` placeholder with a **real generated secret** (`JWT_SECRET`, `API_KEY_SECRET`, `MACHINE_ID_SALT`, `INITIAL_PASSWORD`); also fixes `DATA_DIR`, `PORT`, `BASE_URL`. An existing `.env` is **never overwritten** — only missing keys are filled |
+| **`mirai` command** | `chmod +x` the launcher and links it into `~/.local/bin` (or `/usr/local/bin`), adding it to your `PATH` when needed |
+| Optional | `--build` runs `npm run build`; `--verify` starts the server and polls `/api/health` before finishing |
+
+**This means `mirai start` works immediately after installing — no manual `chmod`, no editing `.env`, no PATH setup.**
+
+```bash
+mirai start       # start (on a headless server it backgrounds itself)
+mirai status
+mirai restart
+mirai stop
+```
+
+If the `mirai` command is not found in the shell you installed from, open a new terminal or run `source ~/.bashrc` once.
+
+Installer options: `--dir <path>`, `--port <n>`, `--branch <ref>`, `--repo <url>`, `--build`, `--verify`, `--no-path`, `--force`, `--help`.
 
 **Run from an existing source checkout:**
 
@@ -169,13 +191,15 @@ The chosen port is persisted to `<dataDir>/config/port.json` (see [Configuration
 
 > Port `20129` is reserved for Mirai's internal use and cannot be used.
 
-**Launcher shortcuts (from a source checkout):** the repo ships `mirai.cmd` (Windows) and `mirai` (bash) so you can start/restart without a global install:
+**Launcher shortcuts:** the repo ships `mirai.cmd` (Windows) and `mirai` (bash) so you can start/restart without a global install:
 
 ```bash
 .\mirai start      # Windows cmd
 .\mirai restart
 ./mirai start      # bash / macOS / Linux
 ```
+
+The GitHub installer above additionally makes `mirai` available globally, so plain `mirai start` works from any directory.
 
 ---
 

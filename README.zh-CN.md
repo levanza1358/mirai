@@ -95,7 +95,7 @@ Claude Code/Codex/OpenClaw/Cursor/Cline è®¾ç½®ï¼š
 
 **å°±è¿™ä¹ˆç®€å•ï¼** å¼€å§‹ä½¿ç”¨å…è´¹ AI æ¨¡åž‹ç¼–ç¨‹ã€‚
 
-**替代方案：从 GitHub 安装源码：**
+**替代方案：从 GitHub 一行命令安装源码：**
 
 Linux/macOS：
 
@@ -109,7 +109,29 @@ Windows PowerShell：
 $tmp = Join-Path $env:TEMP "mirai-install.cmd"; Invoke-WebRequest https://raw.githubusercontent.com/levanza1358/mirai/main/install.cmd -OutFile $tmp; & $tmp
 ```
 
-安装器将仓库克隆到 `~/mirai`（Windows 为 `%USERPROFILE%\\mirai`），运行 `npm install`，并在 `.env` 不存在时从 `.env.example` 创建。若目标目录已存在，安装器会停止，不覆盖文件。安装后进入目录并运行 `npm run dev`。
+安装器可重复执行，并会自动完成所有步骤：
+
+| 步骤 | 说明 |
+| --- | --- |
+| 检查环境 | 需要 `git` 和 **Node.js 20+**；缺少 `lsof` 时给出提示 |
+| 获取源码 | 克隆 `levanza1358/mirai` 到 `~/mirai`（Windows 为 `%USERPROFILE%\mirai`），若已存在则更新 |
+| 安装依赖 | 运行 `npm install` |
+| **`.env`** | 复制 `.env.example`，并把所有 `change-me` 占位符替换为**真实随机密钥**（`JWT_SECRET`、`API_KEY_SECRET`、`MACHINE_ID_SALT`、`INITIAL_PASSWORD`）；同时修正 `DATA_DIR`、`PORT`、`BASE_URL`。已存在的 `.env` **绝不覆盖**，只补充缺失的键 |
+| **`mirai` 命令** | 为启动脚本 `chmod +x`，并链接到 `~/.local/bin`（或 `/usr/local/bin`），必要时写入 `PATH` |
+| 可选 | `--build` 执行 `npm run build`；`--verify` 启动服务并轮询 `/api/health` |
+
+**因此安装完成后 `mirai start` 可直接使用——无需手动 `chmod`、无需编辑 `.env`、无需配置 `PATH`。**
+
+```bash
+mirai start       # 启动（无图形界面的服务器会自动后台运行）
+mirai status
+mirai restart
+mirai stop
+```
+
+若当前 shell 找不到 `mirai` 命令，请打开新终端，或执行一次 `source ~/.bashrc`。
+
+安装器参数：`--dir <path>`、`--port <n>`、`--branch <ref>`、`--repo <url>`、`--build`、`--verify`、`--no-path`、`--force`、`--help`。
 
 **从已有源码目录运行：**
 
@@ -151,6 +173,8 @@ The port is persisted to `<dataDir>/config/port.json` and reused on the next sta
 .\mirai restart
 ./mirai start      # bash / macOS / Linux
 ```
+
+The GitHub installer above additionally installs `mirai` globally, so plain `mirai start` works from any directory.
 
 ---
 

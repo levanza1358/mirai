@@ -88,7 +88,20 @@ Windows PowerShell:
 $tmp = Join-Path $env:TEMP "mirai-install.cmd"; Invoke-WebRequest https://raw.githubusercontent.com/levanza1358/mirai/main/install.cmd -OutFile $tmp; & $tmp
 ```
 
-The installer clones the source repository to `~/mirai` (`%USERPROFILE%\\mirai` on Windows), runs `npm install`, and creates `.env` from `.env.example` only if `.env` is missing. It refuses to overwrite an existing target directory. Start the development server with `npm run dev` from the clone. Use `npm install -g mirai` for the published desktop launcher instead.
+The installer is idempotent and sets everything up in one shot: it clones the source repository to `~/mirai` (`%USERPROFILE%\mirai` on Windows), runs `npm install`, creates `.env` and fills it with **generated secrets** (never overwriting an existing `.env`), marks the `mirai` launcher executable, and links it into `~/.local/bin` so it lands on your `PATH`.
+
+After it finishes, `mirai start` works from any directory — no `chmod`, no `.env` editing, no PATH tweaking:
+
+```bash
+mirai start      # start (backgrounds itself on a headless server)
+mirai status
+mirai restart
+mirai stop
+```
+
+Useful flags: `--dir <path>`, `--port <n>`, `--branch <ref>`, `--build`, `--verify`, `--no-path`. See `install.sh --help`.
+
+It refuses to overwrite a non-empty, non-git target directory. Use `npm install -g mirai` for the published desktop launcher instead.
 
 ---
 
