@@ -2,9 +2,10 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { execSync } = require("child_process");
+const core = require("./autostartCore");
 
-const APP_NAME = "mirai";
-const APP_LABEL = "com.mirai.autostart";
+const APP_NAME = core.APP_NAME;
+const APP_LABEL = core.LAUNCH_AGENT_LABEL;
 
 /**
  * Resolve the absolute path to this package's cli.js.
@@ -40,7 +41,18 @@ function getCliJsPath(cliPath) {
 }
 
 /**
- * Enable auto startup on OS boot
+ * Enable auto startup on OS boot.
+ *
+ * Linux and Windows delegate to the shared core (`autostartCore.js`) so the
+ * tray and the dashboard Settings page produce identical registrations.
+ * Linux no longer refuses to run when `$DISPLAY` is missing: the core writes a
+ * `systemd --user` unit (+ linger), which is exactly what a headless server
+ * needs and what the dashboard toggle exposes.
+ *
+ * macOS keeps its launchd implementation below because it needs the
+ * `launchctl` unload/load dance (and the self-SIGTERM guard) that the shared
+ * core deliberately does not own.
+ *
  * @param {string} cliPath - Optional path to cli.js (defaults to auto-detect)
  * @returns {boolean} success
  */
@@ -48,12 +60,19 @@ function enableAutoStart(cliPath) {
   const platform = process.platform;
 
   if (!["darwin", "win32", "linux"].includes(platform)) return false;
-  if (platform === "linux" && !process.env.DISPLAY) return false;
 
   try {
     if (platform === "darwin") return enableMacOS(cliPath);
-    if (platform === "win32") return enableWindows(cliPath);
-    if (platform === "linux") return enableLinux(cliPath);
+
+    const routerScript = getCliJsPath(cliPath);
+    // Don't write a registration pointing at a non-existent script.
+    if (!routerScript) return false;
+
+    const result = core[platform === "win32" ? "enableWindows" : "enableLinux"]({
+      command: process.execPath,
+      args: [routerScript, "--tray"],
+    });
+    return result.ok === true;
   } catch (err) {
     // Silent fail — autostart is optional
   }
@@ -68,8 +87,8 @@ function disableAutoStart() {
   const platform = process.platform;
   try {
     if (platform === "darwin") return disableMacOS();
-    if (platform === "win32") return disableWindows();
-    if (platform === "linux") return disableLinux();
+    if (platform === "win32") return core.disableWindows().ok === true;
+    if (platform === "linux") return core.disableLinux().ok === true;
   } catch (err) {}
   return false;
 }
@@ -98,11 +117,9 @@ function isAutoStartEnabled() {
         return false;
       }
     } else if (platform === "win32") {
-      const startupPath = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", `${APP_NAME}.vbs`);
-      return fs.existsSync(startupPath);
+      return core.windowsStatus().enabled;
     } else if (platform === "linux") {
-      const desktopPath = path.join(os.homedir(), ".config", "autostart", `${APP_NAME}.desktop`);
-      return fs.existsSync(desktopPath);
+      return core.linuxStatus().enabled;
     }
   } catch (e) {}
   return false;
@@ -233,70 +250,13 @@ function disableMacOS() {
   return true;
 }
 
-// ============ Windows ============
-
-function enableWindows(cliPath) {
-  const startupDir = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
-  const vbsPath = path.join(startupDir, `${APP_NAME}.vbs`);
-
-  if (!fs.existsSync(startupDir)) return false;
-
-  const nodePath = process.execPath;
-  const routerScript = getCliJsPath(cliPath);
-  if (!routerScript) return false;
-
-  // Run node + cli.js directly, hidden window. Avoids the fragile
-  // `mirai.cmd` lookup that depended on the npm prefix path.
-  const vbsContent = `Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """${nodePath}"" ""${routerScript}"" --tray", 0, False
-`;
-  fs.writeFileSync(vbsPath, vbsContent);
-  return true;
-}
-
-function disableWindows() {
-  const vbsPath = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", `${APP_NAME}.vbs`);
-  if (fs.existsSync(vbsPath)) {
-    fs.unlinkSync(vbsPath);
-  }
-  return true;
-}
-
-// ============ Linux ============
-
-function enableLinux(cliPath) {
-  const autostartDir = path.join(os.homedir(), ".config", "autostart");
-  const desktopPath = path.join(autostartDir, `${APP_NAME}.desktop`);
-
-  if (!fs.existsSync(autostartDir)) {
-    try { fs.mkdirSync(autostartDir, { recursive: true }); }
-    catch (e) { return false; }
-  }
-
-  const nodePath = process.execPath;
-  const routerScript = getCliJsPath(cliPath);
-  if (!routerScript) return false;
-
-  const desktopContent = `[Desktop Entry]
-Type=Application
-Name=Mirai
-Comment=Mirai API Proxy
-Exec=${nodePath} ${routerScript} --tray
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-`;
-  fs.writeFileSync(desktopPath, desktopContent);
-  return true;
-}
-
-function disableLinux() {
-  const desktopPath = path.join(os.homedir(), ".config", "autostart", `${APP_NAME}.desktop`);
-  if (fs.existsSync(desktopPath)) {
-    fs.unlinkSync(desktopPath);
-  }
-  return true;
-}
+// ============ Windows / Linux ============
+//
+// Registration for these platforms lives in the shared core
+// (`./autostartCore.js`) — Windows writes a Startup-folder `.vbs`, Linux
+// writes a `systemd --user` unit. Both the tray and the dashboard Settings
+// page go through that module so the two can never drift apart. macOS keeps
+// its launchd handling above.
 
 module.exports = {
   enableAutoStart,

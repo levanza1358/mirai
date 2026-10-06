@@ -201,6 +201,15 @@ if (args[0] === "restart") {
   return;
 }
 
+// `mirai update` pulls the latest code from GitHub, reinstalls deps, rebuilds
+// and restarts. It delegates to the repo's update.sh / update.cmd so the heavy
+// lifting lives next to the installer (single source of truth).
+if (args[0] === "update" || args[0] === "upgrade") {
+  const { runUpdate } = require("./src/cli/commands/update");
+  runUpdate(args.slice(1)).then((code) => process.exit(code));
+  return;
+}
+
 // `start` is a lifecycle alias; remove it before normal option parsing.
 if (args[0] === "start") args.shift();
 
@@ -264,6 +273,9 @@ Commands:
   stop                Stop Mirai, proxy, tunnels, and processes on its ports
   restart             Stop and start Mirai again on the same port. Use after
                       changing the port in the dashboard Settings.
+  update [--check]    Pull the latest code from GitHub, reinstall deps, rebuild
+                      and restart. Your .env and data dir are kept.
+                      (see: ${APP_NAME} update --help)
   connect <server-url> Configure Claude Code for a remote mirai server
                       (npx mirai connect http://host:1463 — no install needed)
   xai video --prompt "..." --output video.mp4

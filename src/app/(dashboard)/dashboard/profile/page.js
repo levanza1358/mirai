@@ -23,6 +23,24 @@ function getLocaleFromCookie() {
   return normalizeLocale(value);
 }
 
+function formatUptime(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours || days) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return parts.join(" ");
+}
+
+const PLATFORM_MECHANISM_LABELS = {
+  linux: "systemd --user (runs without a desktop session)",
+  win32: "Windows Startup folder",
+  darwin: "macOS launchd agent",
+};
+
 const SETTINGS_TABS = [
   { id: "general", label: "General", description: "Appearance, access, network, and data", icon: "tune" },
   { id: "token-saver", label: "Token Saver", description: "Reduce request cost and context size", icon: "savings" },
@@ -66,6 +84,23 @@ export default function ProfilePage() {
   const [oidcTestLoading, setOidcTestLoading] = useState(false);
   const [oidcTestStatus, setOidcTestStatus] = useState({ type: "", message: "" });
   const [oidcExpanded, setOidcExpanded] = useState(false);
+  // Autostart (system boot registration)
+  const [autostart, setAutostart] = useState({
+    loading: true,
+    supported: false,
+    manageable: false,
+    enabled: false,
+    platform: "",
+    mechanism: null,
+    launcherResolved: false,
+    error: "",
+  });
+  const [autostartBusy, setAutostartBusy] = useState(false);
+  const [autostartMsg, setAutostartMsg] = useState({ type: "", message: "" });
+  // System info (OS + hardware)
+  const [systemInfo, setSystemInfo] = useState(null);
+  const [systemInfoLoading, setSystemInfoLoading] = useState(true);
+  const [systemInfoError, setSystemInfoError] = useState("");
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const oidcRedirectUri = origin ? `${origin}/api/auth/oidc/callback` : "/api/auth/oidc/callback";
@@ -159,6 +194,77 @@ export default function ProfilePage() {
       })
       .catch((err) => console.error("Failed to fetch port:", err));
   }, []);
+
+  // Load the current autostart state (which platform mechanism is in play, and
+  // whether it is currently armed).
+  const loadAutostart = async () => {
+    try {
+      const res = await fetch("/api/settings/autostart");
+      const data = await res.json();
+      if (!data?.success) {
+        setAutostart((prev) => ({ ...prev, loading: false, error: data?.error || "Failed to read autostart status" }));
+        return;
+      }
+      setAutostart({
+        loading: false,
+        supported: !!data.supported,
+        manageable: !!data.manageable,
+        enabled: !!data.enabled,
+        platform: data.platform || "",
+        mechanism: data.mechanism || null,
+        launcherResolved: !!data.launcherResolved,
+        error: "",
+      });
+    } catch (err) {
+      setAutostart((prev) => ({ ...prev, loading: false, error: err.message || "Failed to read autostart status" }));
+    }
+  };
+
+  useEffect(() => {
+    loadAutostart();
+  }, []);
+
+  // Load OS + hardware inventory once.
+  useEffect(() => {
+    fetch("/api/settings/system-info")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.success) setSystemInfo(data);
+        else setSystemInfoError(data?.error || "Failed to read system info");
+      })
+      .catch((err) => setSystemInfoError(err.message || "Failed to read system info"))
+      .finally(() => setSystemInfoLoading(false));
+  }, []);
+
+  const toggleAutostart = async (nextEnabled) => {
+    setAutostartBusy(true);
+    setAutostartMsg({ type: "", message: "" });
+    try {
+      const res = await fetch("/api/settings/autostart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setAutostartMsg({ type: "error", message: data.error || "Failed to update autostart." });
+        return;
+      }
+      setAutostart((prev) => ({ ...prev, enabled: !!data.enabled, mechanism: data.mechanism || prev.mechanism }));
+      setAutostartMsg({
+        type: data.warning ? "warning" : "success",
+        message:
+          data.warning ||
+          (data.enabled
+            ? "Autostart enabled — Mirai will start automatically when the machine boots."
+            : "Autostart disabled."),
+      });
+    } catch (err) {
+      setAutostartMsg({ type: "error", message: err.message || "Failed to update autostart." });
+    } finally {
+      setAutostartBusy(false);
+    }
+  };
 
   // Test whether the entered port is free (must pass before Apply is enabled).
   const testPort = async () => {
@@ -1839,6 +1945,189 @@ export default function ProfilePage() {
               disabled={loading}
             />
           </div>
+        </Card>
+
+        {/* Autostart */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 shrink-0">
+              <span className="material-symbols-outlined text-[20px]">rocket_launch</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-semibold">Autostart</h3>
+          </div>
+
+          {autostart.loading ? (
+            <p className="text-xs sm:text-sm text-text-muted">Checking autostart status…</p>
+          ) : autostart.error ? (
+            <p className="text-xs sm:text-sm text-red-500 flex items-center gap-1">
+              <span className="material-symbols-outlined text-[16px]">error</span>
+              {autostart.error}
+            </p>
+          ) : !autostart.supported ? (
+            <p className="text-xs sm:text-sm text-text-muted">
+              Autostart is not supported on this platform ({autostart.platform || "unknown"}).
+            </p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-start sm:items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm sm:text-base">Start Mirai on system boot</p>
+                  <p className="text-xs sm:text-sm text-text-muted">
+                    {autostart.manageable
+                      ? `Registers Mirai with ${PLATFORM_MECHANISM_LABELS[autostart.platform] || autostart.mechanism || "this system"} so the proxy comes back up automatically — no manual systemd setup.`
+                      : "On macOS the Mirai tray helper owns this setting; use the tray menu to change it."}
+                  </p>
+                </div>
+                <Toggle
+                  checked={autostart.enabled}
+                  onChange={(next) => toggleAutostart(next)}
+                  disabled={autostartBusy || !autostart.manageable}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/50">
+                <span className="inline-flex items-center gap-1 rounded-full bg-black/5 dark:bg-white/5 px-2.5 py-1 text-[11px] font-medium text-text-muted">
+                  <span className="material-symbols-outlined text-[14px]">
+                    {autostart.platform === "win32" ? "desktop_windows" : autostart.platform === "darwin" ? "laptop_mac" : "terminal"}
+                  </span>
+                  {autostart.mechanism || autostart.platform}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium",
+                    autostart.enabled
+                      ? "bg-emerald-500/10 text-emerald-500"
+                      : "bg-black/5 dark:bg-white/5 text-text-muted"
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[14px]">
+                    {autostart.enabled ? "check_circle" : "cancel"}
+                  </span>
+                  {autostart.enabled ? "Enabled" : "Disabled"}
+                </span>
+                {!autostart.launcherResolved && autostart.manageable && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/10 px-2.5 py-1 text-[11px] font-medium text-yellow-600 dark:text-yellow-400">
+                    <span className="material-symbols-outlined text-[14px]">warning</span>
+                    Launcher not found
+                  </span>
+                )}
+              </div>
+
+              {autostartMsg.message && (
+                <p
+                  className={cn(
+                    "text-xs sm:text-sm flex items-start gap-1",
+                    autostartMsg.type === "error"
+                      ? "text-red-500"
+                      : autostartMsg.type === "warning"
+                        ? "text-yellow-600 dark:text-yellow-400"
+                        : "text-green-500"
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    {autostartMsg.type === "error" ? "error" : autostartMsg.type === "warning" ? "warning" : "check_circle"}
+                  </span>
+                  {autostartMsg.message}
+                </p>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* System Info */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500 shrink-0">
+              <span className="material-symbols-outlined text-[20px]">memory</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-semibold">System</h3>
+          </div>
+
+          {systemInfoLoading ? (
+            <p className="text-xs sm:text-sm text-text-muted">Reading system information…</p>
+          ) : systemInfoError ? (
+            <p className="text-xs sm:text-sm text-red-500 flex items-center gap-1">
+              <span className="material-symbols-outlined text-[16px]">error</span>
+              {systemInfoError}
+            </p>
+          ) : systemInfo ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                {
+                  icon: "computer",
+                  label: "Operating System",
+                  value: systemInfo.os.releaseName || `${systemInfo.os.platformLabel} ${systemInfo.os.release}`,
+                  sub: `${systemInfo.os.platformLabel} · ${systemInfo.os.arch} · ${systemInfo.os.endianness}`,
+                },
+                {
+                  icon: "developer_board",
+                  label: "CPU",
+                  value: systemInfo.cpu.model || "Unknown",
+                  sub: [
+                    systemInfo.cpu.logicalCores ? `${systemInfo.cpu.logicalCores} logical cores` : null,
+                    systemInfo.cpu.speedMhz ? `${systemInfo.cpu.speedMhz} MHz` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || null,
+                },
+                {
+                  icon: "memory_alt",
+                  label: "Memory",
+                  value: systemInfo.memory.total ? `${systemInfo.memory.used} / ${systemInfo.memory.total}` : "Unknown",
+                  sub: systemInfo.memory.usedPercent != null ? `${systemInfo.memory.usedPercent}% in use` : null,
+                },
+                {
+                  icon: "dns",
+                  label: "Hostname",
+                  value: systemInfo.host.hostname || "Unknown",
+                  sub: systemInfo.os.uptimeSeconds != null ? `Uptime ${formatUptime(systemInfo.os.uptimeSeconds)}` : null,
+                },
+                {
+                  icon: "code",
+                  label: "Runtime",
+                  value: `Node ${systemInfo.runtime.node}`,
+                  sub: [systemInfo.runtime.v8 ? `V8 ${systemInfo.runtime.v8}` : null, `PID ${systemInfo.runtime.pid}`]
+                    .filter(Boolean)
+                    .join(" · "),
+                },
+                {
+                  icon: "folder",
+                  label: "Data Directory",
+                  value: systemInfo.app.dataDir || "Default (~/.mirai)",
+                  sub: systemInfo.app.nodeEnv ? `NODE_ENV=${systemInfo.app.nodeEnv}` : null,
+                },
+              ].map((row) => (
+                <div key={row.label} className="flex items-start gap-3 rounded-lg bg-bg border border-border p-3">
+                  <span className="material-symbols-outlined text-[18px] text-text-muted mt-0.5">{row.icon}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted/70">{row.label}</p>
+                    <p className="text-sm text-text-main break-words">{row.value}</p>
+                    {row.sub && <p className="text-xs text-text-muted break-words">{row.sub}</p>}
+                  </div>
+                </div>
+              ))}
+
+              {systemInfo.host.lanAddresses?.length > 0 && (
+                <div className="sm:col-span-2 flex items-start gap-3 rounded-lg bg-bg border border-border p-3">
+                  <span className="material-symbols-outlined text-[18px] text-text-muted mt-0.5">lan</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted/70">Network addresses</p>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {systemInfo.host.lanAddresses.map((addr) => (
+                        <span
+                          key={`${addr.interface}-${addr.address}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-black/5 dark:bg-white/5 px-2 py-0.5 text-xs font-mono text-text-muted"
+                        >
+                          <span className="not-italic font-sans">{addr.interface}</span>
+                          {addr.address}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
         </Card>
 
         {/* Account actions */}

@@ -127,6 +127,7 @@ mirai start       # 启动（无图形界面的服务器会自动后台运行）
 mirai status
 mirai restart
 mirai stop
+mirai update      # 从 GitHub 拉取最新代码、重新构建并重启
 ```
 
 若当前 shell 找不到 `mirai` 命令，请打开新终端，或执行一次 `source ~/.bashrc`。
@@ -175,6 +176,47 @@ The port is persisted to `<dataDir>/config/port.json` and reused on the next sta
 ```
 
 The GitHub installer above additionally installs `mirai` globally, so plain `mirai start` works from any directory.
+
+### Updating Mirai
+
+mirai 可以从 GitHub 自我更新——拉取最新代码、按需重装依赖、重新构建并重启。**你的 `.env`、数据目录与数据库不会被触碰。**
+
+```bash
+mirai update               # 更新 + 重新构建 + 重启
+mirai update --check       # 只检查是否有更新，不做任何改动
+mirai update --no-restart  # 只更新与构建，不重启
+mirai update --no-build    # 只拉取代码并重装依赖
+mirai update --force-install   # 即使 package.json 未变也强制 npm install
+mirai update --yes         # 非交互：丢弃本地未提交的改动
+```
+
+该逻辑同样以独立脚本形式放在仓库根目录（当 `mirai` 不在 `PATH` 时使用）：
+
+```bash
+./update.sh                # Linux / macOS（在检出目录中运行）
+.\update.cmd               # Windows
+```
+
+| 步骤 | 说明 |
+| --- | --- |
+| 1 | 从 `origin`（或 `--repo <url>`）拉取最新提交 |
+| 2 | 若存在未提交改动则拒绝执行（除非加 `--yes`）——因为硬重置会丢弃它们 |
+| 3 | `git reset --hard` 到拉取到的版本，并打印新的提交日志 |
+| 4 | **仅当** `package.json`/`package-lock.json`/`cli/package.json` 变化时才执行 `npm install` |
+| 5 | 以 `NODE_OPTIONS=--max-old-space-size=6144` 执行 `npm run build`，避免构建时堆内存耗尽 |
+| 6 | 若 Mirai 正在运行则重启，使新构建生效 |
+
+> 在 VPS 上构建是最慢的一步。若内存紧张，请先添加临时 swap（见上文 *Production mode*）——构建大约需要 2 GB。
+
+### 自启动与系统信息（Settings）
+
+在面板中打开 **Settings -> General** 可以找到：
+
+- **Autostart** —— 一个开关，让 Mirai 在机器启动时自动运行，无需手动配置 `systemd`：
+  - **Linux** → 写入 `systemd --user` 单元 **并执行 `loginctl enable-linger`**，因此在没有图形会话的无头服务器上同样有效。
+  - **Windows** → 在个人"启动"文件夹中放置一个隐藏启动项。
+  - **macOS** → 只读显示；launchd 代理由 Mirai 托盘助手管理。
+- **System** —— 显示机器的操作系统（发行版名称）、CPU 型号与核心数、内存用量、主机名、运行时间、网络地址，以及所使用的 Node/V8 运行时。
 
 ---
 

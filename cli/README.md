@@ -97,6 +97,7 @@ mirai start      # start (backgrounds itself on a headless server)
 mirai status
 mirai restart
 mirai stop
+mirai update     # pull the latest code, rebuild, and restart
 ```
 
 Useful flags: `--dir <path>`, `--port <n>`, `--branch <ref>`, `--build`, `--verify`, `--no-path`. See `install.sh --help`.

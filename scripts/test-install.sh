@@ -112,6 +112,64 @@ rc=$?
 [ -f "$WORK/occupied/important.txt" ] && pass "existing files untouched" || fail "existing files destroyed"
 
 echo
+echo "=== test 8: update.sh reports 'already up to date' on a fresh checkout ==="
+UPD="$WORK/mirai-p/update.sh"
+# `git clone` only sees committed files; the test runs before update.sh may be
+# committed, so sync the working-tree updater into the checkout under test.
+for f in update.sh update.cmd; do
+  [ -f "$REPO/$f" ] && cp "$REPO/$f" "$WORK/mirai-p/$f"
+done
+chmod +x "$UPD" 2>/dev/null || true
+if [ -f "$UPD" ]; then
+  ( cd "$WORK/mirai-p" && ./update.sh --check --repo "file://$REPO" ) > "$WORK/update.log" 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] && pass "update --check exit 0" || { fail "update --check exit $rc"; tail -15 "$WORK/update.log"; }
+  "$BIN_GREP" -q "already up to date" "$WORK/update.log" \
+    && pass "update --check reported up to date" || fail "update --check did not report status"
+else
+  fail "update.sh missing from the checkout"
+fi
+
+echo
+echo "=== test 9: update.sh applies a new upstream commit and keeps .env ==="
+# Build a throwaway bare repo seeded from the installed checkout, then push a
+# commit into it and confirm update.sh picks it up.
+if [ -f "$UPD" ]; then
+  BARE="$WORK/upstream.git"
+  DEV="$WORK/upstream-dev"
+  rm -rf "$BARE" "$DEV"
+  git clone -q --bare "$WORK/mirai-p" "$BARE" 2>/dev/null
+  git --git-dir="$BARE" symbolic-ref HEAD refs/heads/main 2>/dev/null
+  # the installed checkout may be detached/shallow; make a real branch
+  ( cd "$WORK/mirai-p" && git checkout -q -B main && git push -q --force "file://$BARE" main ) 2>/dev/null
+  git clone -q "file://$BARE" "$DEV" 2>/dev/null
+  echo "upstream marker $(date +%s)" >> "$DEV/CHANGELOG.md"
+  ( cd "$DEV" && git -c user.email=t@t -c user.name=t commit -qam "test: upstream change" && git push -q origin HEAD:main ) 2>/dev/null
+  ENV_BEFORE=$(cat "$WORK/mirai-p/.env")
+  ( cd "$WORK/mirai-p" && ./update.sh --repo "file://$BARE" --no-build --no-restart --yes ) > "$WORK/update2.log" 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] && pass "update ran exit 0" || { fail "update exit $rc"; tail -20 "$WORK/update2.log"; }
+  "$BIN_GREP" -q "Mirai updated" "$WORK/update2.log" && pass "update reported success" || fail "update success message missing"
+  "$BIN_GREP" -q "upstream marker" "$WORK/mirai-p/CHANGELOG.md" \
+    && pass "upstream commit was pulled in" || fail "upstream commit not applied"
+  ENV_AFTER=$(cat "$WORK/mirai-p/.env")
+  [ "$ENV_BEFORE" = "$ENV_AFTER" ] && pass "update left .env untouched" || fail "update modified .env"
+else
+  fail "update.sh missing - skipping update tests"
+fi
+
+echo
+echo "=== test 10: update.sh refuses to clobber local changes ==="
+if [ -f "$UPD" ]; then
+  echo "local edit" >> "$WORK/mirai-p/CHANGELOG.md"
+  ( cd "$WORK/mirai-p" && ./update.sh --repo "file://$WORK/upstream.git" --no-build --no-restart ) > "$WORK/update3.log" 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] && pass "dirty tree refused (exit $rc)" || fail "dirty tree was not refused"
+  "$BIN_GREP" -qi "local changes" "$WORK/update3.log" && pass "dirty-tree message shown" || fail "dirty-tree message missing"
+  ( cd "$WORK/mirai-p" && git checkout -q -- CHANGELOG.md ) 2>/dev/null
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL TESTS PASSED"
 else

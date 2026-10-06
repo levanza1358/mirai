@@ -129,6 +129,7 @@ mirai start       # start (on a headless server it backgrounds itself)
 mirai status
 mirai restart
 mirai stop
+mirai update      # pull the latest code, rebuild, and restart
 ```
 
 If the `mirai` command is not found in the shell you installed from, open a new terminal or run `source ~/.bashrc` once.
@@ -200,6 +201,47 @@ The chosen port is persisted to `<dataDir>/config/port.json` (see [Configuration
 ```
 
 The GitHub installer above additionally makes `mirai` available globally, so plain `mirai start` works from any directory.
+
+### Updating Mirai
+
+Mirai can update itself from GitHub — pull the newest code, reinstall dependencies if they changed, rebuild, and restart. **Your `.env`, data directory, and database are never touched.**
+
+```bash
+mirai update               # update + rebuild + restart
+mirai update --check       # only report whether an update is available
+mirai update --no-restart  # update and rebuild, but leave the server as-is
+mirai update --no-build    # pull + reinstall dependencies only
+mirai update --force-install   # always run npm install, even if package.json is unchanged
+mirai update --yes         # non-interactive: discard local uncommitted changes
+```
+
+The same logic is available as a standalone script in the repo root, in case the launcher is not on your `PATH`:
+
+```bash
+./update.sh                # Linux / macOS   (run from the checkout)
+.\update.cmd               # Windows
+```
+
+| Step | What happens |
+| --- | --- |
+| 1 | Fetches the latest commit from `origin` (or `--repo <url>`) |
+| 2 | Refuses to run if you have uncommitted changes (unless `--yes`) — a hard reset would drop them |
+| 3 | `git reset --hard` onto the fetched revision and prints the new commit log |
+| 4 | Runs `npm install` **only when `package.json`/`package-lock.json`/`cli/package.json` changed** |
+| 5 | Runs `npm run build` with `NODE_OPTIONS=--max-old-space-size=6144` so the build does not run out of heap |
+| 6 | Restarts a running Mirai so the new build takes effect |
+
+> On a VPS the build is the slow step. If RAM is tight, add temporary swap first (see *Production mode* above) — the build needs roughly 2 GB.
+
+### Autostart and system info (Settings)
+
+Open **Settings → General** in the dashboard to find:
+
+- **Autostart** — a toggle that makes Mirai start automatically when the machine boots. No manual `systemd` setup needed:
+  - **Linux** → a `systemd --user` unit **plus `loginctl enable-linger`**, so it works on a headless server with no desktop session.
+  - **Windows** → a hidden launcher in your personal Startup folder.
+  - **macOS** → shown read-only; the Mirai tray helper owns the launchd agent.
+- **System** — the machine's OS (distro pretty-name), CPU model and core count, memory used/total, hostname, uptime, network addresses, and the Node/V8 runtime in use.
 
 ---
 
