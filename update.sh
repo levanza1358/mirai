@@ -30,8 +30,14 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${MIRAI_DIR:-$SCRIPT_DIR}"
+# Resolve the checkout to update. `${BASH_SOURCE[0]}` is unset under `set -u` when
+# this script is piped into bash (`curl ... | bash -s -- --dir <path>`), so guard
+# it and fall back to the same default the installer uses.
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+fi
+INSTALL_DIR="${MIRAI_DIR:-${SCRIPT_DIR:-$HOME/mirai}}"
 REPO_URL="${MIRAI_REPO_URL:-}"
 BRANCH="${MIRAI_BRANCH:-}"
 CHECK_ONLY=0
@@ -53,22 +59,75 @@ step()  { printf '%s==>%s %s\n' "$C_BLUE" "$C_RESET" "$*"; }
 ok()    { printf '%s  ok%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn()  { printf '%s  !%s  %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()   { printf '%s error:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+# ---------------------------------------------------------------- help
+# Embedded instead of `sed -n '2,29p' "$0"`: when the script is piped into bash
+# (`curl ... | bash`), `$0` is just "bash" and there is no file to read.
+print_help() {
+  cat <<'EOF'
+Mirai updater for Linux / macOS.
+
+Usage:
+  cd ~/mirai && ./update.sh            # or: mirai update
+  curl -fsSL https://raw.githubusercontent.com/levanza1358/mirai/main/update.sh | bash -s -- --dir ~/mirai
+
+What it does, in order:
+  1. Finds the Mirai checkout (the directory holding this script, or --dir).
+  2. Records the current revision so a failure can be reported clearly.
+  3. Fetches the latest commit from GitHub and hard-resets to it.
+  4. Reinstalls npm dependencies (skipped when package.json is unchanged,
+     unless --force-install).
+  5. Rebuilds the production bundle (npm run build) - the standalone output
+     is what `mirai start` serves, so a rebuild is required after every pull.
+  6. Restarts a running Mirai so the new build takes effect.
+
+.env, your data dir (~/.mirai) and the database are never touched.
+
+Options:
+  --dir <path>      Checkout to update        (default: script dir, else ~/mirai)
+  --branch <ref>    Git branch/tag to follow  (default: main, or the current branch)
+  --repo <url>      Git remote URL
+  --check           Only report whether an update is available; change nothing
+  --no-restart      Do not restart Mirai after updating
+  --no-build        Skip the production build
+  --force-install   Always run `npm install`, even if package.json is unchanged
+  --yes, -y         Assume yes (non-interactive)
+  -h, --help        Show this help
+EOF
+}
+
 have()  { command -v "$1" >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------- parse arguments
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --dir)            INSTALL_DIR="${2:?--dir needs a path}"; shift 2 ;;
-    --branch)         BRANCH="${2:?--branch needs a name}"; shift 2 ;;
-    --repo)           REPO_URL="${2:?--repo needs a url}"; shift 2 ;;
-    --check)          CHECK_ONLY=1; shift ;;
-    --no-restart)     DO_RESTART=0; shift ;;
-    --no-build)       DO_BUILD=0; shift ;;
-    --force-install)  FORCE_INSTALL=1; shift ;;
-    --yes|-y)         ASSUME_YES=1; shift ;;
-    -h|--help)        sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) die "unknown option: $1 (try --help)" ;;
+# Index-based scan over a snapshot of "$@": mutating "$@" with `shift` under
+# `set -u` makes expanding "$@" an unbound-variable error when no arguments were
+# passed (plain `curl ... | bash`), and `for` has no lookahead so it cannot skip
+# the value that --dir/--branch/--repo consume.
+argv=("$@")
+i=0
+while [ "$i" -lt "${#argv[@]}" ]; do
+  arg="${argv[$i]}"
+  case "$arg" in
+    --check)          CHECK_ONLY=1 ;;
+    --no-restart)     DO_RESTART=0 ;;
+    --no-build)       DO_BUILD=0 ;;
+    --force-install)  FORCE_INSTALL=1 ;;
+    --yes|-y)         ASSUME_YES=1 ;;
+    -h|--help)        print_help; exit 0 ;;
+    --dir|--branch|--repo)
+      value="${argv[$((i + 1))]:-}"
+      case "$value" in
+        ""|--*) die "$arg needs a value (try --help)" ;;
+      esac
+      case "$arg" in
+        --dir)    INSTALL_DIR="$value" ;;
+        --branch) BRANCH="$value" ;;
+        --repo)   REPO_URL="$value" ;;
+      esac
+      i=$((i + 1))
+      ;;
+    *) die "unknown option: $arg (try --help)" ;;
   esac
+  i=$((i + 1))
 done
 
 case "$INSTALL_DIR" in
