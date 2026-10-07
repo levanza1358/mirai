@@ -1,7 +1,6 @@
 นี่คือเอกสารแปลภาษาไทยของไฟล์ Markdown ต้นฉบับ โดยรักษาโครงสร้างและซินแท็กซ์ทางเทคนิคทั้งหมดไว้เหมือนเดิม
 
 <div align="center">
-  <img src="../images/mirai.png?1" alt="แดชบอร์ด Mirai" width="800"/>
   
   # Mirai - Free AI Router
   

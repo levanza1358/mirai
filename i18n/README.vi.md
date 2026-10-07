@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="../images/mirai.png?1" alt="Bảng điều khiển Mirai" width="800"/>
   
   # Mirai - Free AI Router & Token Saver
   

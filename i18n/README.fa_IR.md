@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="./images/mirai.png?1" alt="داشبورد Mirai" width="800"/>
   
   # Mirai - مسیریاب رایگان هوش مصنوعی و ذخیره‌ساز توکن
   

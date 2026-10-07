@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="../images/mirai.png?1" alt="Painel do Mirai" width="800"/>
   
   # Mirai — roteador de IA GRATUITO e economizador de tokens
   

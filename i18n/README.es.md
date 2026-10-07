@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="../images/mirai.png?1" alt="Panel de control de Mirai" width="800"/>
   
   # Mirai - Enrutador de IA GRATUITO y ahorrador de tokens
   

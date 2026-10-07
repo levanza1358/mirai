@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="../images/mirai.png?1" alt="Панель управления Mirai" width="800"/>
   
   # Mirai - Free AI Router
   

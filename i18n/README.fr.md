@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="../images/mirai.png?1" alt="Tableau de bord Mirai" width="800"/>
   
   # Mirai - Routeur IA GRATUIT et économiseur de tokens
   
