@@ -642,9 +642,9 @@ export function getCapabilitiesForModel(provider, model) {
   // (deepseek-v4 → thinkingFormat:deepseek, vision:false) must not win here.
   if (provider === "commandcode" || provider === "cmc") {
     const providerCaps = PROVIDER_CAPABILITIES.commandcode;
-    if (providerCaps?.[model]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
-    if (providerCaps?.[baseModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
-    return {
+    if (providerCaps?.[model]) return withDocSupport({ ...DEFAULT_CAPABILITIES, ...providerCaps[model] });
+    if (providerCaps?.[baseModel]) return withDocSupport({ ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] });
+    return withDocSupport({
       ...DEFAULT_CAPABILITIES,
       reasoning: true,
       thinkingFormat: "commandcode",
@@ -652,28 +652,45 @@ export function getCapabilitiesForModel(provider, model) {
       vision: !isCommandCodeTextOnly(model),
       contextWindow: 1000000,
       maxOutput: 384000,
-    };
+    });
   }
 
   // 1. Provider-specific override
   if (provider) {
     const providerCaps = PROVIDER_CAPABILITIES[provider];
-    if (providerCaps?.[model]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
-    if (providerCaps?.[baseModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
+    if (providerCaps?.[model]) return withDocSupport({ ...DEFAULT_CAPABILITIES, ...providerCaps[model] });
+    if (providerCaps?.[baseModel]) return withDocSupport({ ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] });
   }
 
   // 2. Canonical exact, then catalog overlay so provider-scoped models.dev
   //    deltas still apply. Step 1 above still short-circuits.
-  if (MODEL_CAPABILITIES[baseModel]) return refine(MODEL_CAPABILITIES[baseModel], provider, model);
-  if (MODEL_CAPABILITIES[model]) return refine(MODEL_CAPABILITIES[model], provider, model);
+  if (MODEL_CAPABILITIES[baseModel]) return withDocSupport(refine(MODEL_CAPABILITIES[baseModel], provider, model));
+  if (MODEL_CAPABILITIES[model]) return withDocSupport(refine(MODEL_CAPABILITIES[model], provider, model));
 
   // 3. Pattern match (first match wins), refined by catalog + name heuristic
   for (const { pattern, caps } of PATTERN_CAPABILITIES) {
     if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) {
-      return refine(caps, provider, model);
+      return withDocSupport(refine(caps, provider, model));
     }
   }
 
   // 4. Floor
-  return refine(null, provider, model);
+  return withDocSupport(refine(null, provider, model));
+}
+
+/**
+ * A vision-capable model almost universally accepts PDF / document input too:
+ * Claude maps it to a `document` block, Gemini to inlineData, OpenAI to a `file`
+ * block, and OpenAI-compatible gateways (CodeBuddy, OpenRouter…) forward the
+ * block as-is. Without this, stripUnsupportedModalities drops every PDF
+ * (caps.pdf stays false from the DEFAULT floor) and replaces it with a
+ * "[file omitted]" placeholder — the model never sees the file even on
+ * providers that natively support it.
+ *
+ * Applied to every return path of getCapabilitiesForModel because provider
+ * overrides and the commandcode branch bypass refine().
+ */
+function withDocSupport(caps) {
+  if (caps && caps.vision) caps.pdf = true;
+  return caps;
 }

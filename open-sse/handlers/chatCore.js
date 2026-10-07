@@ -28,7 +28,7 @@ import { compressMessages, formatRtkLog } from "../rtk/index.js";
 import { compressWithHeadroom, formatHeadroomLog, formatHeadroomSizeLog, isHeadroomPhantomSavings } from "../rtk/headroom.js";
 import { compressWithPxpipe } from "../rtk/pxpipe.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
-import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
+import { stripUnsupportedModalities, preExtractPDFs } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType, shouldDefaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
@@ -172,6 +172,30 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Auto-strip media blocks the model can't read (vision/audio/pdf) before translation.
   if (!passthrough) {
     const caps = getCapabilitiesForModel(provider, model);
+
+    // TEMP diagnostics: dump the raw request shape so we can see how Copilot
+    // Chat actually carries attachments. Writes once per request to a rotating
+    // file. Remove once the PDF path is confirmed for all clients.
+    try {
+      const { appendFileSync } = await import("node:fs");
+      const isResponses = Array.isArray(body?.input);
+      const isMessages = Array.isArray(body?.messages);
+      const last = isResponses ? body.input[body.input.length - 1] : isMessages ? body.messages[body.messages.length - 1] : null;
+      const lastContentTypes = Array.isArray(last?.content) ? last.content.map((b) => `${b?.type || "?"}:${Object.keys(b || {}).join("+")}`).join(",") : typeof last?.content;
+      const lastMsgKeys = last ? Object.keys(last).join(",") : "(no last msg)";
+      const bodyKeys = Object.keys(body).filter((k) => !["messages","input","model","stream","stream_options","temperature","top_p","max_tokens","tools","tool_choice","reasoning_effort","reasoning","store","metadata","parallel_tool_calls","user"].includes(k));
+      appendFileSync("pdf-debug.log", `[${new Date().toISOString()}] RAW fmt=${sourceFormat} bodyKeys=[${bodyKeys.join(",")}] lastMsgKeys=[${lastMsgKeys}] lastContent=[${lastContentTypes}]\n`);
+    } catch {}
+
+    // Extract PDF attachments to text first (async — pdf-parse). Every gateway
+    // — including OpenAI-compatible ones like CodeBuddy that reject an inline
+    // `file` block — then receives the PDF's contents as text, so the model
+    // always reads the file instead of getting a 400 or a silent drop.
+    try {
+      const n = await preExtractPDFs(body, sourceFormat);
+      if (n) log?.debug?.("MODALITY", `extracted PDF attachment to text for ${provider}/${model}`);
+    } catch (e) { log?.warn?.("MODALITY", `PDF extraction failed: ${e.message}`); }
+
     if (stripUnsupportedModalities(body, sourceFormat, caps)) {
       log?.debug?.("MODALITY", `stripped unsupported media for ${provider}/${model}`);
     }

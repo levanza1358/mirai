@@ -20,7 +20,14 @@ const nextConfig = {
   // letter). That throw happens at module scope, so every consumer of `open` dies on
   // import — including xAI/Grok token refresh, which loads the OAuth service that imports
   // it. Keeping it external preserves the real `import.meta.url` at runtime.
-  serverExternalPackages: ["better-sqlite3", "sql.js", "node:sqlite", "bun:sqlite", "open"],
+  //
+  // `pdf-parse` must stay external for the same class of reason: it lazily
+  // dynamic-imports the pdfjs worker ("./pdf.worker.mjs" relative to the compiled
+  // chunk). Bundled, that relative specifier resolves against .next/server/chunks
+  // and fails with "Setting up fake worker failed: Cannot find module …pdf.worker.mjs".
+  // External, pdfjs runs as plain Node — the worker resolves inside its own
+  // package and text extraction works.
+  serverExternalPackages: ["better-sqlite3", "sql.js", "node:sqlite", "bun:sqlite", "open", "pdf-parse", "pdfjs-dist"],
   turbopack: {
     root: tracingRoot
   },

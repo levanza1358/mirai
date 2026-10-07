@@ -1,19 +1,154 @@
 import { inflateRawSync } from "node:zlib";
+import path from "node:path";
+
+// pdf-parse is async (backed by pdfjs-dist), so PDF text extraction lives in
+// a separate async function (extractPDFText). The synchronous extractAttachmentText
+// handles OOXML / plain-text formats only.
+let PDFParseCtor = null;
+async function loadPDFParse() {
+  if (PDFParseCtor) return PDFParseCtor;
+  // Lazy import so the dependency is only loaded when a PDF is actually
+  // encountered — keeps cold-start fast for providers that never see one.
+  const mod = await import("pdf-parse");
+  PDFParseCtor = mod.PDFParse;
+  return PDFParseCtor;
+}
+
+// Point pdfjs-dist at its real worker module. Inside a Next.js/Turbopack
+// bundle pdfjs cannot resolve its default fake-worker target ("./pdf.worker.mjs"
+// relative to the compiled chunk) and aborts with "Setting up fake worker
+// failed: Cannot find module …pdf.worker.mjs".
+//
+// pdfjs checks `globalThis.pdfjsWorker.WorkerMessageHandler` BEFORE attempting
+// the dynamic import of workerSrc, so we import the worker file ourselves (via
+// an absolute file:// URL found on the real filesystem) and install it there.
+// require.resolve must NOT be used to find the file: bundlers rewrite literal
+// resolve calls at build time into virtual module ids that cannot be loaded.
+let workerConfigured = false;
+async function ensureWorker() {
+  if (workerConfigured) return;
+  workerConfigured = true;
+  const dbg = async (msg) => {
+    try {
+      const { appendFileSync } = await import("node:fs");
+      appendFileSync("pdf-debug.log", `[${new Date().toISOString()}] ensureWorker: ${msg}\n`);
+    } catch {}
+  };
+  try {
+    if (globalThis.pdfjsWorker?.WorkerMessageHandler) {
+      await dbg("pdfjsWorker already installed");
+      return;
+    }
+    const workerPath = await findWorkerFile();
+    if (!workerPath) {
+      await dbg("worker file not found on disk");
+      return;
+    }
+    const { pathToFileURL } = await import("node:url");
+    const workerUrl = pathToFileURL(workerPath).href;
+    // Both `import(workerUrl)` and `require.resolve(literal)` are intercepted by
+    // the bundler (Turbopack rewrites the former into a runtime error —
+    // "expression is too dynamic" — and the latter into a virtual module id).
+    // createRequire is constructed at runtime, so calls through it stay native
+    // Node; Node 24 supports require() of ESM, so the .mjs worker loads fine.
+    const { createRequire } = await import("node:module");
+    const require = createRequire(import.meta.url);
+    const workerModule = require(workerPath);
+    if (workerModule?.WorkerMessageHandler) {
+      // Installing on globalThis short-circuits pdfjs's fake-worker loader:
+      // PDFWorker.#mainThreadWorkerMessageHandler returns this handler and the
+      // broken relative import never runs.
+      globalThis.pdfjsWorker = workerModule;
+      await dbg(`pdfjsWorker installed from ${workerUrl}`);
+    } else {
+      await dbg(`worker module has no WorkerMessageHandler (${workerUrl})`);
+    }
+  } catch (e) {
+    await dbg(`FAILED: ${e?.stack || e?.message || e}`);
+    console.warn(`[MODALITY] pdfjs worker config failed: ${e?.message || e}`);
+  }
+}
+
+// Walk up from the compiled module's directory and from cwd looking for
+// node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs.
+async function findWorkerFile() {
+  const { existsSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const rel = path.join("node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.mjs");
+  const bases = [];
+  try { bases.push(process.cwd()); } catch {}
+  try {
+    let dir = path.dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 10; i++) {
+      bases.push(dir);
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {}
+  for (const base of bases) {
+    try {
+      const candidate = path.join(base, rel);
+      if (existsSync(candidate)) return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * Extract plain text from a PDF buffer (async — pdf-parse / pdfjs-dist is
+ * async-only). Returns null on any failure so callers can fall back to
+ * dropping the block or forwarding it natively.
+ *
+ * @param {Buffer|Uint8Array} bytes
+ * @returns {Promise<string|null>}
+ */
+export async function extractPDFText(bytes) {
+  if (!bytes) return null;
+  try {
+    await ensureWorker();
+    const PDFParse = await loadPDFParse();
+    const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    const parser = new PDFParse({ data: new Uint8Array(buf) });
+    const result = await parser.getText();
+    await parser.destroy();
+    // pdf-parse decorates output with page markers like "-- 1 of 3 --\n";
+    // strip those so the text block reads naturally.
+    const text = (result?.text || "")
+      .replace(/\n*--\s*\d+\s+of\s+\d+\s*--\s*/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    return text || null;
+  } catch (e) {
+    // Never silent: a failed extraction forwards the raw PDF block downstream,
+    // which OpenAI-compatible gateways (CodeBuddy…) reject with 400. Surface
+    // the real cause so the server console shows why extraction fell through.
+    console.error(`[MODALITY] PDF text extraction failed: ${e?.message || e}`);
+    debugLog(`extractPDFText FAILED: ${e?.stack || e?.message || e}`);
+    return null;
+  }
+}
+
+// TEMP diagnostics: append extraction events to a project-local file so failures
+// inside the Next.js dev server (whose console isn't always visible) can be
+// diagnosed. Remove once the PDF path is confirmed stable.
+import { appendFileSync } from "node:fs";
+function debugLog(msg) {
+  try {
+    appendFileSync("pdf-debug.log", `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {}
+}
 
 /**
  * Extract plain text from an attachment so providers that cannot accept the
  * original mime type still receive its content.
  *
- * Why: Anthropic's Messages API only accepts `application/pdf` as a `document`
- * block. Sending a `.docx` there is impossible, and silently dropping it (the
- * previous behaviour) loses the user's file with no explanation — a request that
- * says "read the attached contract" reaches the model with no attachment at all.
- *
  * `.docx`/`.pptx`/`.xlsx` are ZIP archives, so we read the relevant XML part with
- * the built-in zlib and strip the markup. No new dependency.
+ * the built-in zlib and strip the markup. PDF is handled by the async
+ * extractPDFText (pdf-parse / pdfjs-dist is async-only).
  */
 
-// Mime types whose bytes we can turn into text.
+// Mime types whose bytes we can turn into text synchronously.
 // OOXML (.docx/.xlsx/.pptx) are ZIP archives; the inner part holds the content.
 const ZIP_TEXT_PARTS = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ["word/document.xml"],
@@ -26,7 +161,7 @@ const ZIP_TEXT_PARTS = {
     "ppt/slides/slide1.xml",
   ],
   "application/msword": [], // legacy binary .doc — not a zip, handled below
-  "application/pdf": [], // handled natively by the provider, never extracted
+  "application/pdf": [], // async — handled by extractPDFText, not here
 };
 
 /**

@@ -268,7 +268,11 @@ describe("OOXML is converted even when the model claims document support", () =>
     expect(parts.map((p) => p.text).join("")).toContain("LAPORAN BULANAN");
   });
 
-  it("Claude: a PDF document block is left untouched", () => {
+  // Note: in production, preExtractPDFs() (async) extracts PDF to text before
+  // stripUnsupportedModalities runs — every gateway gets the text, not the raw
+  // block. This test validates only the sync stripper in isolation: with
+  // caps.pdf=true it does NOT touch a PDF block (no placeholder injected).
+  it("Claude: a PDF document block is left untouched by the sync stripper", () => {
     const pdfBlock = {
       type: "document",
       source: { type: "base64", media_type: "application/pdf", data: "JVBERi0xLjQK" },
@@ -278,7 +282,7 @@ describe("OOXML is converted even when the model claims document support", () =>
     expect(body.messages[0].content).toEqual([pdfBlock]);
   });
 
-  it("OpenAI: a PDF file block is left untouched when pdf is supported", () => {
+  it("OpenAI: a PDF file block is left untouched by the sync stripper when pdf is supported", () => {
     const fileBlock = {
       type: "file",
       file: { filename: "x.pdf", file_data: "data:application/pdf;base64,JVBERi0xLjQK" },
